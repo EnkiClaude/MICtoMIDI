@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    name: Core library + unit tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DM2M_BUILD_PLUGIN=OFF
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  plugin-linux:
+    name: Plugin build + pluginval (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install JUCE dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libx11-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxcursor-dev libxcomposite-dev \
+            libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev xvfb
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Hosting smoke test
+        run: |
+          xvfb-run -a build/tools/plugin-smoke-test/m2m_plugin_smoke_test_artefacts/Release/m2m_plugin_smoke_test \
+            build/plugin/MICtoMIDI_artefacts/Release/VST3/MICtoMIDI.vst3
+      - name: pluginval
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
+          unzip -q pluginval.zip
+          xvfb-run -a ./pluginval --strictness-level 10 --validate-in-process \
+            --validate build/plugin/MICtoMIDI_artefacts/Release/VST3/MICtoMIDI.vst3
+
+  plugin-macos:
+    name: Plugin build + pluginval (macOS arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: brew install ninja || true
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+      - name: Build
+        run: cmake --build build
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Hosting smoke test
+        run: |
+          build/tools/plugin-smoke-test/m2m_plugin_smoke_test_artefacts/Release/m2m_plugin_smoke_test \
+            build/plugin/MICtoMIDI_artefacts/Release/VST3/MICtoMIDI.vst3
+      - name: pluginval (VST3 + AU)
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          PV=pluginval.app/Contents/MacOS/pluginval
+          $PV --strictness-level 10 --validate-in-process --validate build/plugin/MICtoMIDI_artefacts/Release/VST3/MICtoMIDI.vst3
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/plugin/MICtoMIDI_artefacts/Release/AU/MICtoMIDI.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          $PV --strictness-level 10 --validate-in-process --validate ~/Library/Audio/Plug-Ins/Components/MICtoMIDI.component
+      - name: Package unsigned build
+        run: |
+          cd build/plugin/MICtoMIDI_artefacts/Release
+          zip -qry "$GITHUB_WORKSPACE/MICtoMIDI-macOS-arm64-unsigned.zip" VST3 AU Standalone
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MICtoMIDI-macOS-arm64-unsigned
+          path: MICtoMIDI-macOS-arm64-unsigned.zip
