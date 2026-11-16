@@ -12,6 +12,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(M2M_BUILD_PLUGIN "Build the JUCE plugin (VST3/AU) and standalone app" ON)
 option(M2M_BUILD_TESTS  "Build unit tests for the core library"              ON)
+option(M2M_BUILD_TOOLS  "Build offline command-line tools"                   ON)
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
@@ -36,4 +37,8 @@ if(M2M_BUILD_PLUGIN)
     FetchContent_MakeAvailable(JUCE)
     add_subdirectory(plugin)
     add_subdirectory(tools/plugin-smoke-test)
+endif()
+
+if(M2M_BUILD_TOOLS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/m2m-cli/CMakeLists.txt")
+    add_subdirectory(tools/m2m-cli)
 endif()
