@@ -5,3 +5,15 @@ file(GLOB M2M_CLI_SOURCES CONFIGURE_DEPENDS *.cpp)
 add_executable(m2m-cli ${M2M_CLI_SOURCES})
 target_link_libraries(m2m-cli PRIVATE m2m_testsupport mictomidi_core)
 m2m_enable_warnings(m2m-cli)
+
+# Smoke tests through ctest when the test suite is enabled too.
+if(M2M_BUILD_TESTS)
+    add_test(NAME m2m_cli_scenarios COMMAND m2m-cli scenarios)
+    add_test(NAME m2m_cli_eval_trigger_smoke
+             COMMAND m2m-cli eval --mode trigger --scenarios level_bursts)
+    add_test(NAME m2m_cli_gen_and_run
+             COMMAND ${CMAKE_COMMAND}
+                     -DCLI=$<TARGET_FILE:m2m-cli>
+                     -DOUT=${CMAKE_CURRENT_BINARY_DIR}/smoke
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/SmokeTest.cmake)
+endif()

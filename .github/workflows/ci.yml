@@ -7,18 +7,36 @@ on:
 
 jobs:
   core:
-    name: Core library + unit tests (Linux)
+    name: Core library + unit tests + m2m-cli (Linux)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DM2M_BUILD_PLUGIN=OFF
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DM2M_BUILD_PLUGIN=OFF -DM2M_BUILD_TESTS=ON -DM2M_BUILD_TOOLS=ON
       - name: Build
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: m2m-cli smoke check (level trigger)
+        run: build/tools/m2m-cli/m2m-cli eval --mode trigger --scenarios level_bursts --report build/m2m-eval-trigger.json
+
+      # ---- Metric regression gates (PLAN.md §9, Phase 2) -------------------
+      # Enable once the melody/beatbox engines are wired into
+      # tools/m2m-cli/EngineFactory.cpp and baselines are committed. Create a
+      # baseline with:  m2m-cli eval --mode melody --write-baseline tests/baselines/melody.json
+      # A metric past its stored tolerance makes m2m-cli exit 4 and fails CI.
+      #
+      # - name: Melody regression gate
+      #   run: build/tools/m2m-cli/m2m-cli eval --mode melody --scenarios all-melody --baseline tests/baselines/melody.json --report build/m2m-eval-melody.json
+      # - name: Beatbox regression gate
+      #   run: build/tools/m2m-cli/m2m-cli eval --mode beatbox --scenarios all-beatbox --baseline tests/baselines/beatbox.json --report build/m2m-eval-beatbox.json
+      # - uses: actions/upload-artifact@v4
+      #   if: always()
+      #   with:
+      #     name: m2m-eval-reports
+      #     path: build/m2m-eval-*.json
 
   plugin-linux:
     name: Plugin build + pluginval (Linux)
