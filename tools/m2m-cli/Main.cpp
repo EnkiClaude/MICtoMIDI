@@ -670,7 +670,10 @@ namespace
         newBaseline.blockSize = c.blockSize;
         newBaseline.toleranceMs = c.toleranceMs;
         if (baseline)
+        {
             newBaseline.tolerance = baseline->tolerance;
+            newBaseline.limits = baseline->limits;
+        }
 
         std::vector<std::string> failures;
         double sumF1 = 0.0, sumOnsetF1 = 0.0, worstF1 = 1.0;
@@ -714,6 +717,7 @@ namespace
             if (baseline)
                 if (const auto it = baseline->scenarios.find (name); it != baseline->scenarios.end())
                     newBaseline.scenarios[name].knownLimitation = it->second.knownLimitation;
+            applyLimits (newBaseline.scenarios[name], newBaseline.limits);
 
             if (baseline)
             {

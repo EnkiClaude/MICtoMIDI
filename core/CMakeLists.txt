@@ -16,3 +16,10 @@ else()
 endif()
 
 set_target_properties(mictomidi_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# Same results on every compiler/architecture (the m2m-cli regression gate
+# compares against stored baselines): no fused multiply-add contraction,
+# which clang enables by default on arm64.
+if(NOT MSVC)
+    target_compile_options(mictomidi_core PRIVATE -ffp-contract=off)
+endif()

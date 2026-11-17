@@ -24,7 +24,7 @@ enum class ClassifierMode : int { Rules, Calibrated };
 struct BeatboxParams
 {
     OnsetParams onset;                 // sensitivity 0..1, refractoryMs (40), minLevelDb (-45)
-    float analysisWindowMs = 20.0f;    // 10..40: audio after the onset used for classification
+    float analysisWindowMs = 18.0f;    // 10..40: audio after the onset used for classification (18: hit <= 20 ms, PLAN 3)
     ClassifierMode classifierMode = ClassifierMode::Rules; // Calibrated falls back to Rules until usable
     ClassifierParams classifier;       // per-class sensitivity / enabled, minScore
     float gateMs = 60.0f;              // NoteOn -> NoteOff (1..2000)

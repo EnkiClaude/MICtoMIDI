@@ -266,6 +266,18 @@ BaselineEntry makeBaselineEntry (const Metrics& m, const BaselineTolerance& tol)
     return e;
 }
 
+void applyLimits (BaselineEntry& e, const BaselineLimits& limits)
+{
+    if (! e.knownLimitation.empty())
+        return;
+    if (std::isfinite (limits.minF1) && ! (e.minF1 >= limits.minF1))
+        e.minF1 = limits.minF1;
+    if (std::isfinite (limits.maxMeanAbsOnsetErrorMs) && std::isfinite (e.maxMeanAbsOnsetErrorMs))
+        e.maxMeanAbsOnsetErrorMs = std::min (e.maxMeanAbsOnsetErrorMs, limits.maxMeanAbsOnsetErrorMs);
+    if (std::isfinite (limits.maxFalseTriggersPerMinute) && std::isfinite (e.maxFalseTriggersPerMinute))
+        e.maxFalseTriggersPerMinute = std::min (e.maxFalseTriggersPerMinute, limits.maxFalseTriggersPerMinute);
+}
+
 std::vector<std::string> checkBaseline (const std::string& scenario, const Metrics& m, const BaselineEntry& e)
 {
     constexpr double eps = 1e-9;
@@ -298,6 +310,16 @@ Json baselineToJson (const Baseline& b)
     tol["onsetErrorMs"] = b.tolerance.onsetErrorMs;
     tol["falseTriggersPerMinute"] = b.tolerance.falseTriggersPerMinute;
     j["tolerance"] = std::move (tol);
+
+    Json lim = Json::object();
+    if (std::isfinite (b.limits.minF1))
+        lim["minF1"] = b.limits.minF1;
+    if (std::isfinite (b.limits.maxMeanAbsOnsetErrorMs))
+        lim["maxMeanAbsOnsetErrorMs"] = b.limits.maxMeanAbsOnsetErrorMs;
+    if (std::isfinite (b.limits.maxFalseTriggersPerMinute))
+        lim["maxFalseTriggersPerMinute"] = b.limits.maxFalseTriggersPerMinute;
+    if (! lim.keys().empty())
+        j["limits"] = std::move (lim);
 
     Json sc = Json::object();
     for (const auto& [name, e] : b.scenarios)
@@ -335,6 +357,13 @@ bool baselineFromJson (const Json& j, Baseline& out, std::string& error)
         out.tolerance.f1 = numOr (*tol, "f1", out.tolerance.f1);
         out.tolerance.onsetErrorMs = numOr (*tol, "onsetErrorMs", out.tolerance.onsetErrorMs);
         out.tolerance.falseTriggersPerMinute = numOr (*tol, "falseTriggersPerMinute", out.tolerance.falseTriggersPerMinute);
+    }
+
+    if (const auto* lim = j.find ("limits"); lim != nullptr && lim->isObject())
+    {
+        out.limits.minF1 = numOr (*lim, "minF1", nan);
+        out.limits.maxMeanAbsOnsetErrorMs = numOr (*lim, "maxMeanAbsOnsetErrorMs", nan);
+        out.limits.maxFalseTriggersPerMinute = numOr (*lim, "maxFalseTriggersPerMinute", nan);
     }
 
     const auto* sc = j.find ("scenarios");

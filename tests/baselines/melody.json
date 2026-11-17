@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "mode": "melody",
+  "blockSize": 256,
+  "toleranceMs": 50,
+  "tolerance": {
+    "f1": 0.02,
+    "onsetErrorMs": 2,
+    "falseTriggersPerMinute": 1
+  },
+  "limits": {
+    "minF1": 0.9,
+    "maxMeanAbsOnsetErrorMs": 30,
+    "maxFalseTriggersPerMinute": 0.5
+  },
+  "scenarios": {
+    "chromatic_scale": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 20.48583333333335,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 22.48583333333335,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "consonant_onsets": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 24.034722222222197,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 26.034722222222197,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "dynamics": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.245833333333312,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20.245833333333312,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "fast_16ths_detached": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 21.64583333333333,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 23.64583333333333,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "fast_16ths_legato": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 29.312499999999982,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 30,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "glide": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 19.312499999999968,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 21.312499999999968,
+      "maxFalseTriggersPerMinute": 0.5,
+      "maxGlideFailures": 0
+    },
+    "high_range": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 15.090277777777736,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 17.090277777777736,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "hum_50hz": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.9125,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20.9125,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "hum_60hz": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 19.445833333333276,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 21.445833333333276,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "low_male_range": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 32.312500000000036,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 34.312500000000036,
+      "maxFalseTriggersPerMinute": 1,
+      "knownLimitation": "Mean note-on latency ~32 ms for 82-131 Hz notes, over the 30 ms target: the window must hold ~2 periods of minHz 80 Hz (25 ms). Accuracy is gated normally."
+    },
+    "major_scale_legato": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 29.312499999999957,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 30,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "noise_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": null,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": null,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "noisy_20db_snr": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 21.17916666666675,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 23.17916666666675,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "pitch_drift": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 19.20138888888892,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 21.20138888888892,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "repeated_same_pitch": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 19.20138888888892,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 21.20138888888892,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "scoop_ups": {
+      "f1": 0,
+      "meanAbsOnsetErrorMs": null,
+      "falseTriggersPerMinute": 60.50420168067227,
+      "minF1": 0,
+      "maxMeanAbsOnsetErrorMs": null,
+      "maxFalseTriggersPerMinute": 61.50420168067227,
+      "knownLimitation": "A 150-cent scoop into a note is indistinguishable from a wide vibrato within the 30 ms latency budget: the tracker emits a 40 ms note at the scoop start pitch, then the target note ~70 ms after the onset (outside the 50 ms tolerance). Gates = measured -/+ tolerance."
+    },
+    "silence": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": null,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": null,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "soft_rearticulation": {
+      "f1": 0.2857142857142857,
+      "meanAbsOnsetErrorMs": 19.97916666666652,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.2657142857142857,
+      "maxMeanAbsOnsetErrorMs": 21.97916666666652,
+      "maxFalseTriggersPerMinute": 1,
+      "knownLimitation": "Legato syllables separated only by 6-10 dB dips are not retriggered at the default retriggerSensitivity 0.5 (needs a 12 dB rise); ~0.9 catches them (F1 0.92) but risks false retriggers on tremolo. Gates = measured -/+ tolerance."
+    },
+    "sustained_notes": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 19.845833333333253,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 21.845833333333253,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "tremolo_vibrato": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 20.201388888888985,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 22.201388888888985,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "vibrato": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 17.97916666666671,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 19.97916666666671,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "voice_formants": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 20.97916666666678,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 22.97916666666678,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "weak_fundamental": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 22.512500000000014,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 24.512500000000014,
+      "maxFalseTriggersPerMinute": 0.5
+    }
+  }
+}
