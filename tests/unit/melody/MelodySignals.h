@@ -219,6 +219,4 @@ inline bool monophonicInvariantsHold (const std::vector<AbsEvent>& ev)
     return sounding < 0;
 }
 
-inline int midiToHzInt (int note) { return static_cast<int> (midiToHz (note)); }
-
 } // namespace m2m::melodytest
