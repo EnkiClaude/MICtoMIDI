@@ -18,8 +18,10 @@ See [PLAN.md](PLAN.md) for the full design and roadmap.
   (kick, snare, clap, closed hat, open hat). Rule-based classifier out of the box,
   or calibrate it to your own sounds (a few examples per sound; saved with your
   project, exportable to a file).
-- Latency is reported to the host and shown in the window (about 25–30 ms in
-  Melody mode and 20–25 ms in Beatbox mode with the default settings).
+- Latency is reported to the host and shown in the window (about 20–30 ms in
+  Melody mode and about 19 ms in Beatbox mode with the default settings).
+- Accuracy is measured on every change by an offline harness (`m2m-cli`) with
+  34 synthetic scenarios and a CI regression gate; see [docs/m2m-cli.md](docs/m2m-cli.md).
 
 Not yet verified on a real Mac in Ableton Live: see the manual checklist
 [docs/phase1-ableton-test.md](docs/phase1-ableton-test.md).
