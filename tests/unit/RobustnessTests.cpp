@@ -45,7 +45,7 @@ namespace
             const auto len = static_cast<int> (std::min<std::size_t> (static_cast<std::size_t> (block), n - i));
             e.process (audio + i, len, buf);
             for (const auto& ev : buf)
-                c.events.push_back ({ pos + ev.sampleOffset, ev });
+                c.events.push_back ({ pos + ev.sampleOffset, { ev.type, ev.channel, ev.note, ev.velocity, 0 } });
             c.maxFill = std::max (c.maxFill, static_cast<int> (buf.size()));
             pos += len;
         }
@@ -63,7 +63,7 @@ namespace
             if (buf.empty())
                 return;
             for (const auto& ev : buf)
-                c.events.push_back ({ pos, ev });
+                c.events.push_back ({ pos + ev.sampleOffset, { ev.type, ev.channel, ev.note, ev.velocity, 0 } });
         }
     }
 
@@ -286,8 +286,7 @@ TEST_CASE ("Robustness: block sizes 1 and 8192, empty blocks, blocks larger than
         run (*e, sc->audio.data(), sc->audio.size(), 5000, 1024, c, pos);
         flushAll (*e, 1024, c, pos);
         CHECK (pairingProblem (c.events).empty());
-        std::vector<TimedEvent> a = c.events, b = r256.events;
-        CHECK (a.size() == b.size());
+        CHECK (c.events == r256.events); // same output whatever the block size
     }
 }
 
@@ -329,4 +328,38 @@ TEST_CASE ("Robustness: reset() and prepare() mid-note release the note on the n
             else
                 checkTelemetry (static_cast<const BeatboxEngine&> (*e));
         }
+}
+
+TEST_CASE ("latencySamples() matches the measured note-on delay", "[latency]")
+{
+    // The reported latency is a typical value for host compensation; it must
+    // be within 4 ms of the mean delay measured on plain material.
+    const double sr = 48000.0;
+    struct Case { bool melody; PitchAlgorithm algo; const char* scenario; };
+    for (const auto& c : { Case { true, PitchAlgorithm::Mpm, "sustained_notes" },
+                           Case { true, PitchAlgorithm::Yin, "sustained_notes" },
+                           Case { false, PitchAlgorithm::Mpm, "basic_beat_120bpm" } })
+    {
+        INFO (c.scenario << (c.melody ? (c.algo == PitchAlgorithm::Mpm ? " mpm" : " yin") : ""));
+        const auto sc = makeScenario (c.scenario, sr);
+        std::unique_ptr<IEngine> e;
+        if (c.melody)
+        {
+            auto m = std::make_unique<MelodyEngine>();
+            auto p = m->getParams();
+            p.detector = c.algo;
+            m->setParams (p);
+            e = std::move (m);
+        }
+        else
+        {
+            e = std::make_unique<BeatboxEngine>();
+        }
+        const auto r = runEngine (*e, sc->audio, sr);
+        const auto m = evaluate (sc->notes, r.notes, sc->durationSec());
+        REQUIRE (m.truePositives > 0);
+        const double reportedMs = 1000.0 * r.latencySamples / sr;
+        INFO ("reported " << reportedMs << " ms, measured " << m.meanSignedOnsetErrorMs << " ms");
+        CHECK (std::abs (reportedMs - m.meanSignedOnsetErrorMs) <= 4.0);
+    }
 }
