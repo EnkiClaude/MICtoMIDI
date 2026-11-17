@@ -3,6 +3,7 @@
 #include "m2m/test/Notes.h"
 
 #include <map>
+#include <string>
 #include <vector>
 
 namespace m2m::test
@@ -81,12 +82,36 @@ struct Metrics
 
     ConfusionMatrix confusion;
     std::vector<NoteMatch> matches;
+
+    // Glide check (only with glide segments, see evaluate()).
+    int glideChecks = 0;          // glide segments checked
+    int glideFailures = 0;        // segments that broke a glide rule
+    int glidePassingNotes = 0;    // in-between notes accepted as passing notes
+    std::vector<std::string> glideProblems; // one line per broken rule
 };
 
 /** durationSec is used for false triggers per minute; if <= 0 the latest
     onset/offset seen is used. */
 Metrics evaluate (const std::vector<TruthNote>& truth, const std::vector<DetectedNote>& detected,
                   double durationSec, const MatchOptions& options = {});
+
+/** Evaluation with pitch glides.
+
+    Truth for a glide is its start note (until the glide) and its end note
+    with onset = glide end (when the target pitch is reached). Detections
+    that start inside a glide (after startSec, up to endSec + tolerance)
+    with a pitch strictly between fromNote and toNote are "passing notes":
+    they are removed before the normal matching (neither hits nor false
+    triggers). Each glide is then checked on the detections sounding during
+    it (from startSec to endSec + tolerance):
+      - the first is fromNote and the last is toNote;
+      - pitches move monotonically in the glide's direction;
+      - at most |toNote - fromNote| + 1 notes;
+      - never two notes at once, and no gaps (each note ends where the next
+        starts, within 1 ms).
+    Failures are counted in glideFailures (described in glideProblems). */
+Metrics evaluate (const std::vector<TruthNote>& truth, const std::vector<DetectedNote>& detected,
+                  double durationSec, const MatchOptions& options, const std::vector<GlideSegment>& glides);
 
 /** Convenience: onset-only evaluation (ignores pitch). */
 Metrics evaluateOnsets (const std::vector<TruthNote>& truth, const std::vector<DetectedNote>& detected,

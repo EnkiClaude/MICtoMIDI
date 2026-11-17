@@ -353,6 +353,16 @@ namespace
         return j;
     }
 
+    void printGlideCheck (const Metrics& m)
+    {
+        if (m.glideChecks == 0)
+            return;
+        std::printf ("  glide check: %d/%d glides ok, %d passing notes\n", m.glideChecks - m.glideFailures,
+                     m.glideChecks, m.glidePassingNotes);
+        for (const auto& p : m.glideProblems)
+            std::printf ("    %s\n", p.c_str());
+    }
+
     void printMetrics (const Metrics& m, const Metrics& onsetOnly)
     {
         std::printf ("  truth %d, detected %d, matched %d (tolerance %.0f ms)\n",
@@ -365,6 +375,7 @@ namespace
         std::printf ("  offset error: mean |e| %s ms over %d notes\n", fmtMs (m.meanAbsOffsetErrorMs).c_str(), m.offsetPairs);
         std::printf ("  false triggers %.2f/min (%d), octave errors %d, wrong pitch %d\n",
                      m.falseTriggersPerMinute, m.spuriousDetections, m.octaveErrors, m.wrongPitch);
+        printGlideCheck (m);
     }
 
     void printRunInfo (const RunResult& r)
@@ -460,8 +471,8 @@ namespace
         if (truth)
         {
             const double tol = c.toleranceMs / 1000.0;
-            const auto m = evaluate (truth->notes, result.notes, result.durationSec(), { tol, true });
-            const auto mo = evaluateOnsets (truth->notes, result.notes, result.durationSec(), tol);
+            const auto m = evaluate (truth->notes, result.notes, result.durationSec(), { tol, true }, truth->glides);
+            const auto mo = evaluate (truth->notes, result.notes, result.durationSec(), { tol, false }, truth->glides);
             printMetrics (m, mo);
             report["truth"] = args.get ("--truth");
             report["metrics"] = metricsToJson (m);
@@ -676,14 +687,15 @@ namespace
             if (c.dumpHits)
                 hitLog.attach (*engine, ro);
             const auto r = runEngine (*engine, sc->audio, sc->sampleRate, ro);
-            const auto m = evaluate (sc->notes, r.notes, sc->durationSec(), { tol, true });
-            const auto mo = evaluateOnsets (sc->notes, r.notes, sc->durationSec(), tol);
+            const auto m = evaluate (sc->notes, r.notes, sc->durationSec(), { tol, true }, sc->glides);
+            const auto mo = evaluate (sc->notes, r.notes, sc->durationSec(), { tol, false }, sc->glides);
 
             std::printf ("%-22s %6.3f %6.3f %6.3f %8.3f %9s %9s %8.2f %5d %5d\n", name.c_str(), m.precision, m.recall,
                          m.f1, mo.f1, fmtMs (m.meanAbsOnsetErrorMs).c_str(), fmtMs (m.meanSignedOnsetErrorMs).c_str(),
                          m.falseTriggersPerMinute, m.octaveErrors, m.wrongPitch);
             if (c.dumpHits)
                 printHits (hitLog, sc->sampleRate, &sc->notes, c.toleranceMs);
+            printGlideCheck (m);
 
             sumF1 += m.f1;
             sumOnsetF1 += mo.f1;
@@ -697,6 +709,9 @@ namespace
             scenariosJson.push (std::move (s));
 
             newBaseline.scenarios[name] = makeBaselineEntry (m, newBaseline.tolerance);
+            if (baseline)
+                if (const auto it = baseline->scenarios.find (name); it != baseline->scenarios.end())
+                    newBaseline.scenarios[name].knownLimitation = it->second.knownLimitation;
 
             if (baseline)
             {

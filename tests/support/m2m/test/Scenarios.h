@@ -16,6 +16,7 @@ struct Scenario
     double sampleRate = 48000.0;
     std::vector<float> audio;
     std::vector<TruthNote> notes;   // sorted by onset
+    std::vector<GlideSegment> glides; // pitch glides (melody), scored by the glide check
 
     double durationSec() const noexcept
     {

@@ -45,6 +45,12 @@ namespace
                 sc.notes.push_back ({ start + n.onsetSec, start + n.offsetSec, n.midiNote });
         }
 
+        /** Record a glide relative to a sound that starts at soundStartSec. */
+        void addGlide (double soundStartSec, double relStart, double relEnd, int fromNote, int toNote)
+        {
+            sc.glides.push_back ({ soundStartSec + relStart, soundStartSec + relEnd, fromNote, toNote });
+        }
+
         /** Mix a drum hit at an absolute time (the timeline grows as needed). */
         void addHit (DrumKind kind, double atSec, const DrumParams& p)
         {
@@ -210,8 +216,9 @@ namespace
 
     Scenario glide (double sr)
     {
-        // Truth splits each glide at its midpoint (in time, which is also the
-        // midpoint in cents): first pitch before, second pitch after.
+        // Truth: the start note until the glide begins and the end note from
+        // the moment the glide arrives; the glide itself is scored by the
+        // glide check (Metrics.h), which allows chromatic passing notes.
         Timeline tl ("glide", sr);
         tl.rest (0.25);
 
@@ -221,9 +228,10 @@ namespace
             const double before = 0.5, glideSec = 0.15, after = 0.5;
             auto t = glideTone (sr, hz (g.from), hz (g.to), before, glideSec, after, partials::voiceLike(), -12.0);
             applyEnvelope (t, sr, voiceEnv);
-            const double mid = before + 0.5 * glideSec;
             const double len = static_cast<double> (t.size()) / sr;
-            tl.addSound (t, { { 0.0, mid, g.from }, { mid, len, g.to } });
+            const double start = tl.now();
+            tl.addSound (t, { { 0.0, before, g.from }, { before + glideSec, len, g.to } });
+            tl.addGlide (start, before, before + glideSec, g.from, g.to);
             tl.rest (0.3);
         }
         return tl.finish();
@@ -444,7 +452,7 @@ namespace
             { { "chromatic_scale", C::Melody, "chromatic scale C3..C5, 0.25 s notes, 0.1 s gaps" }, chromaticScale },
             { { "major_scale_legato", C::Melody, "C major scale, 0.35 s notes, no gaps (pitch steps only)" }, majorScaleLegato },
             { { "vibrato", C::Melody, "3 notes with +-50 cent vibrato at 5/6/7 Hz; one note each" }, vibrato },
-            { { "glide", C::Melody, "60->67 and 69->64 glides over 150 ms; truth splits at glide midpoint" }, glide },
+            { { "glide", C::Melody, "60->67 and 69->64 glides over 150 ms; scored with the glide check" }, glide },
             { { "repeated_same_pitch", C::Melody, "note 62 six times with 60-80 ms gaps" }, repeatedSamePitch },
             { { "weak_fundamental", C::Melody, "low notes whose fundamental is 20 dB below the 2nd harmonic" }, weakFundamental },
             { { "dynamics", C::Melody, "notes at -30..-6 dBFS peak" }, dynamics },

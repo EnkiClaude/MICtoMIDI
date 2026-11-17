@@ -55,12 +55,28 @@ Json truthToJson (const TruthFile& truth)
         notes.push (std::move (o));
     }
     j["notes"] = std::move (notes);
+
+    if (! truth.glides.empty())
+    {
+        Json gl = Json::array();
+        for (const auto& g : truth.glides)
+        {
+            Json o = Json::object();
+            o["startSec"] = g.startSec;
+            o["endSec"] = g.endSec;
+            o["fromNote"] = g.fromNote;
+            o["toNote"] = g.toNote;
+            gl.push (std::move (o));
+        }
+        j["glides"] = std::move (gl);
+    }
     return j;
 }
 
 Json truthToJson (const Scenario& scenario)
 {
-    return truthToJson (TruthFile { scenario.name, scenario.sampleRate, scenario.durationSec(), scenario.notes });
+    return truthToJson (TruthFile { scenario.name, scenario.sampleRate, scenario.durationSec(), scenario.notes,
+                                    scenario.glides });
 }
 
 bool truthFromJson (const Json& j, TruthFile& out, std::string& error)
@@ -98,6 +114,20 @@ bool truthFromJson (const Json& j, TruthFile& out, std::string& error)
 
     std::stable_sort (out.notes.begin(), out.notes.end(),
                       [] (const TruthNote& a, const TruthNote& b) { return a.onsetSec < b.onsetSec; });
+
+    if (const auto* gl = j.find ("glides"); gl != nullptr && gl->isArray())
+        for (std::size_t i = 0; i < gl->size(); ++i)
+        {
+            const auto& g = gl->at (i);
+            if (! g.isObject() || g.find ("startSec") == nullptr || g.find ("endSec") == nullptr
+                || g.find ("fromNote") == nullptr || g.find ("toNote") == nullptr)
+            {
+                error = "truth glide " + std::to_string (i) + " needs startSec, endSec, fromNote, toNote";
+                return false;
+            }
+            out.glides.push_back ({ g.getNumber ("startSec"), g.getNumber ("endSec"),
+                                    static_cast<int> (g.getNumber ("fromNote")), static_cast<int> (g.getNumber ("toNote")) });
+        }
     return true;
 }
 
@@ -164,6 +194,16 @@ Json metricsToJson (const Metrics& m)
     j["durationSec"] = m.durationSec;
     j["onsetToleranceMs"] = m.onsetToleranceMs;
     j["pitchMatched"] = m.pitchMatched;
+    if (m.glideChecks > 0)
+    {
+        j["glideChecks"] = m.glideChecks;
+        j["glideFailures"] = m.glideFailures;
+        j["glidePassingNotes"] = m.glidePassingNotes;
+        Json probs = Json::array();
+        for (const auto& p : m.glideProblems)
+            probs.push (p);
+        j["glideProblems"] = std::move (probs);
+    }
 
     Json conf = Json::object();
     for (const auto& [truthNote, row] : m.confusion.counts)
@@ -221,6 +261,8 @@ BaselineEntry makeBaselineEntry (const Metrics& m, const BaselineTolerance& tol)
     e.minF1 = std::max (0.0, m.f1 - tol.f1);
     e.maxMeanAbsOnsetErrorMs = std::isfinite (m.meanAbsOnsetErrorMs) ? m.meanAbsOnsetErrorMs + tol.onsetErrorMs : nan;
     e.maxFalseTriggersPerMinute = m.falseTriggersPerMinute + tol.falseTriggersPerMinute;
+    if (m.glideChecks > 0)
+        e.maxGlideFailures = m.glideFailures;
     return e;
 }
 
@@ -237,6 +279,9 @@ std::vector<std::string> checkBaseline (const std::string& scenario, const Metri
     if (std::isfinite (e.maxFalseTriggersPerMinute) && m.falseTriggersPerMinute > e.maxFalseTriggersPerMinute + eps)
         fails.push_back (scenario + ": false triggers " + fmt (m.falseTriggersPerMinute) + "/min > max "
                          + fmt (e.maxFalseTriggersPerMinute) + "/min");
+    if (std::isfinite (e.maxGlideFailures) && m.glideFailures > e.maxGlideFailures + eps)
+        fails.push_back (scenario + ": " + std::to_string (m.glideFailures) + " glide check failures > max "
+                         + fmt (e.maxGlideFailures));
     return fails;
 }
 
@@ -264,6 +309,10 @@ Json baselineToJson (const Baseline& b)
         o["minF1"] = e.minF1;
         o["maxMeanAbsOnsetErrorMs"] = e.maxMeanAbsOnsetErrorMs;
         o["maxFalseTriggersPerMinute"] = e.maxFalseTriggersPerMinute;
+        if (std::isfinite (e.maxGlideFailures))
+            o["maxGlideFailures"] = e.maxGlideFailures;
+        if (! e.knownLimitation.empty())
+            o["knownLimitation"] = e.knownLimitation;
         sc[name] = std::move (o);
     }
     j["scenarios"] = std::move (sc);
@@ -304,6 +353,8 @@ bool baselineFromJson (const Json& j, Baseline& out, std::string& error)
         e.minF1 = numOr (o, "minF1", nan);
         e.maxMeanAbsOnsetErrorMs = numOr (o, "maxMeanAbsOnsetErrorMs", nan);
         e.maxFalseTriggersPerMinute = numOr (o, "maxFalseTriggersPerMinute", nan);
+        e.maxGlideFailures = numOr (o, "maxGlideFailures", nan);
+        e.knownLimitation = o.getString ("knownLimitation");
         out.scenarios[sc->keys()[i]] = e;
     }
     return true;

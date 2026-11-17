@@ -5,6 +5,7 @@
 #include "m2m/test/Metrics.h"
 #include "m2m/test/Notes.h"
 
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -32,6 +33,7 @@ struct TruthFile
     double sampleRate = 0.0;
     double durationSec = 0.0;
     std::vector<TruthNote> notes;   // sorted by onset after reading
+    std::vector<GlideSegment> glides; // optional "glides": [{ startSec, endSec, fromNote, toNote }]
 };
 
 Json truthToJson (const TruthFile& truth);
@@ -89,6 +91,11 @@ struct BaselineEntry
     double minF1 = 0.0;
     double maxMeanAbsOnsetErrorMs = 0.0;
     double maxFalseTriggersPerMinute = 0.0;
+    double maxGlideFailures = std::numeric_limits<double>::quiet_NaN(); // only for scenarios with glides
+
+    /** Free text kept through --write-baseline: why a gate is looser than
+        PLAN.md asks for (a known limitation). Empty for normal entries. */
+    std::string knownLimitation;
 };
 
 struct Baseline

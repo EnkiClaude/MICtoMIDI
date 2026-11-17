@@ -20,6 +20,21 @@ struct TruthNote
     bool operator== (const TruthNote&) const = default;
 };
 
+/** A continuous pitch glide (portamento) inside a sung phrase, from
+    fromNote (held until startSec) to toNote (reached at endSec). A
+    semitone-quantising tracker may legitimately step through some of the
+    notes in between, so glides are scored by a dedicated check (see
+    evaluate() in Metrics.h) rather than by a single switch time. */
+struct GlideSegment
+{
+    double startSec = 0.0;
+    double endSec   = 0.0;
+    int    fromNote = 0;
+    int    toNote   = 0;
+
+    bool operator== (const GlideSegment&) const = default;
+};
+
 /** A note reconstructed from an engine's NoteOn/NoteOff stream. */
 struct DetectedNote
 {
