@@ -319,6 +319,7 @@ MelodyPage::MelodyPage (APVTS& s) : state (s)
                                "YIN: robust default. MPM: can track fast changes better.");
     minHz = &detection.add<ParamSlider> (state, id::melMinHz, "Min freq", accent,
                                          "Lowest pitch to detect. Lower values need a longer analysis window: more latency.");
+    minHz->setHint ("Lower = more latency");
     detection.add<ParamSlider> (state, id::melMaxHz, "Max freq", accent, "Highest pitch to detect");
     detection.add<ParamSlider> (state, id::melConfidence, "Confidence", accent,
                                 "How sure the detector must be before a pitch counts. Raise it if you get stray notes.");
@@ -338,7 +339,7 @@ MelodyPage::MelodyPage (APVTS& s) : state (s)
     velocity.add<ParamSlider> (state, id::velCurve, "Curve", accent, "Below 1: louder; above 1: softer");
     velocity.add<ParamToggle> (state, id::velFixed, "Fixed velocity", accent);
     velocity.add<ParamSlider> (state, id::velFixedValue, "Fixed value", accent);
-    velocity.add<ParamSlider> (state, id::melChannel, "MIDI channel", accent);
+    velocity.add<ParamSlider> (state, id::melChannel, "Channel", accent, "MIDI channel for melody notes");
 
     advanced.add<ParamSlider> (state, id::melHysteresis, "Hysteresis", accent,
                                "How far the pitch must move (cents) before the note changes. Higher = steadier through vibrato.");

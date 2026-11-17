@@ -81,7 +81,7 @@ private:
 
     // classifier + calibration panel
     std::unique_ptr<ParamCombo> classifier;
-    juce::Label classifierStatus, calibTitle, calibPrompt, calibCount;
+    juce::Label classifierStatus, calibTitle, calibPrompt, calibCount, calibHelp;
     juce::ComboBox calibClass;
     juce::TextButton calibrateButton { "Calibrate" }, doneButton { "Done" }, cancelButton { "Cancel" },
                      clearButton { "Clear" }, clearAllButton { "Clear All" },

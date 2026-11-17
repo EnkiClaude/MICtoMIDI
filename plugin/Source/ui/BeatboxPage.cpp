@@ -227,6 +227,14 @@ BeatboxPage::BeatboxPage (MicToMidiProcessor& p, APVTS& s) : processor (p), stat
     exportButton.onClick = [this] { exportCalibration(); };
     importButton.onClick = [this] { importCalibration(); };
 
+    styleLabel (calibHelp, 12.0f, colours::textFaint);
+    calibHelp.setJustificationType (juce::Justification::topLeft);
+    calibHelp.setText ("How to calibrate:\n1. Pick a sound and press Calibrate.\n2. Perform it " + juce::String (examplesToAsk)
+                           + " times, the way you will use it.\n3. Press Done. Repeat for each sound you use.\n"
+                             "4. Set Classifier to Calibrated.\nCalibration is saved with your project.",
+                       juce::dontSendNotification);
+    addAndMakeVisible (calibHelp);
+
     for (auto* b : { &calibrateButton, &clearButton, &clearAllButton, &exportButton, &importButton })
         addAndMakeVisible (*b);
     addChildComponent (doneButton);
@@ -241,9 +249,10 @@ BeatboxPage::BeatboxPage (MicToMidiProcessor& p, APVTS& s) : processor (p), stat
                                 "Shortest time between two hits");
     windowSlider = &detection.add<ParamSlider> (state, id::bbWindowMs, "Analysis", accent,
         "Audio analysed after each hit before deciding what it was. Longer = more accurate, more latency.");
+    windowSlider->setHint ("Longer = more accurate, more latency");
 
     output.add<ParamSlider> (state, id::bbGateMs, "Note length", accent, "Time between note-on and note-off");
-    output.add<ParamSlider> (state, id::bbChannel, "MIDI channel", accent, "10 = General MIDI drums");
+    output.add<ParamSlider> (state, id::bbChannel, "Channel", accent, "10 = General MIDI drums");
     velocity.add<ParamSlider> (state, id::velSensitivity, "Sensitivity", accent,
                                "0 % = always the fixed velocity, 100 % = follows how hard you hit");
     velocity.add<ParamSlider> (state, id::velCurve, "Curve", accent, "Below 1: louder; above 1: softer");
@@ -346,7 +355,7 @@ void BeatboxPage::refreshCalibrationUi()
         calibCount.setVisible (calibrating);
         doneButton.setVisible (calibrating);
         cancelButton.setVisible (calibrating);
-        for (auto* comp : std::initializer_list<juce::Component*> { &calibClass, &calibrateButton, &clearButton,
+        for (auto* comp : std::initializer_list<juce::Component*> { &calibHelp, &calibClass, &calibrateButton, &clearButton,
                                                                     &clearAllButton, &exportButton, &importButton })
             comp->setVisible (! calibrating);
         layoutCalibrationPanel (calibArea);
@@ -436,6 +445,8 @@ void BeatboxPage::layoutCalibrationPanel (juce::Rectangle<int> area)
     exportButton.setBounds (row2.removeFromLeft (row2.getWidth() / 2 - 3));
     row2.removeFromLeft (6);
     importButton.setBounds (row2);
+    r.removeFromTop (10);
+    calibHelp.setBounds (r);
 }
 
 void BeatboxPage::resized()
@@ -472,7 +483,7 @@ void BeatboxPage::resized()
     colSound.setBounds (header);
 
     const int rowGap = 4;
-    const int rowH = juce::jlimit (18, 40, (r.getHeight() - 4 * rowGap) / 5);
+    const int rowH = juce::jlimit (18, 56, (r.getHeight() - 4 * rowGap) / 5);
     for (auto& row : rows)
     {
         auto line = r.removeFromTop (rowH);

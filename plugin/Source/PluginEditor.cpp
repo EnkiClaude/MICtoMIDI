@@ -11,8 +11,6 @@ MicToMidiEditor::MicToMidiEditor (MicToMidiProcessor& p)
       melodyPage (p.getState()),
       beatboxPage (p, p.getState())
 {
-    setLookAndFeel (&lookAndFeel);
-
     addAndMakeVisible (header);
     addChildComponent (melodyPage);
     addChildComponent (beatboxPage);
@@ -21,6 +19,9 @@ MicToMidiEditor::MicToMidiEditor (MicToMidiProcessor& p)
     footer.setText (juce::String::fromUTF8 ("Tip: use headphones. Sound from speakers leaking into the mic causes stray notes."),
                     juce::dontSendNotification);
     addAndMakeVisible (footer);
+
+    // After the children exist, so they all receive lookAndFeelChanged().
+    setLookAndFeel (&lookAndFeel);
 
     setResizable (true, true);
     setResizeLimits (minWidth, minHeight, 1800, 1300);
