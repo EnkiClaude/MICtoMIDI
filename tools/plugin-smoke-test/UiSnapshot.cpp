@@ -38,11 +38,26 @@ void setParam (MicToMidiProcessor& p, const char* id, float value)
 
 /** Opens an editor, feeds the signal (the editor drains the telemetry) and
     renders it. */
-bool snapshot (MicToMidiProcessor& p, const std::vector<float>& signal, const juce::File& file, int w, int h)
+juce::Button* findButton (juce::Component& c, const juce::String& text)
+{
+    if (auto* b = dynamic_cast<juce::Button*> (&c); b != nullptr && b->getButtonText() == text && b->isVisible())
+        return b;
+    for (auto* child : c.getChildren())
+        if (auto* found = findButton (*child, text))
+            return found;
+    return nullptr;
+}
+
+bool snapshot (MicToMidiProcessor& p, const std::vector<float>& signal, const juce::File& file, int w, int h,
+               const juce::String& clickButton = {})
 {
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     editor->setSize (w, h);
     feed (p, signal);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil (100);
+    if (clickButton.isNotEmpty())
+        if (auto* b = findButton (*editor, clickButton))
+            b->triggerClick();
     juce::MessageManager::getInstance()->runDispatchLoopUntil (600); // timers drain telemetry
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
     file.deleteFile();
@@ -77,6 +92,30 @@ int main (int argc, char** argv)
 
     bool ok = true;
 
+    // A Phase 1 (state version 1) session must load without trouble: retired
+    // parameters are dropped, new ones keep their defaults.
+    {
+        juce::XmlElement old ("MICtoMIDI");
+        old.setAttribute ("stateVersion", 1);
+        for (auto [id, v] : { std::pair { "threshold", -20.0 }, { "note", 48.0 }, { "channel", 3.0 }, { "velocity", 90.0 } })
+        {
+            auto* e = old.createNewChildElement ("PARAM");
+            e->setAttribute ("id", id);
+            e->setAttribute ("value", v);
+        }
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (old, block);
+        p.setStateInformation (block.getData(), (int) block.getSize());
+        juce::MemoryBlock now;
+        p.getStateInformation (now);
+        const auto xml = juce::AudioProcessor::getXmlFromBinary (now.getData(), (int) now.getSize());
+        const bool migrated = xml != nullptr && xml->getIntAttribute ("stateVersion") == m2m::params::stateVersion
+                              && xml->getChildByAttribute ("id", "threshold") == nullptr
+                              && p.getModeParam() == m2m::params::Mode::Melody;
+        std::cout << (migrated ? "PASS" : "FAIL") << " Phase 1 state loads and is migrated\n";
+        ok &= migrated;
+    }
+
     // --- Melody: a short sung phrase ------------------------------------------
     {
         using namespace m2m::smoke;
@@ -93,6 +132,7 @@ int main (int argc, char** argv)
         setParam (p, m2m::params::id::mode, 0.0f);
         ok &= snapshot (p, s, dir.getChildFile ("melody.png"), w, h);
         ok &= snapshot (p, s, dir.getChildFile ("melody-min.png"), MicToMidiEditor::minWidth, MicToMidiEditor::minHeight);
+        ok &= snapshot (p, s, dir.getChildFile ("melody-advanced.png"), w, h, "Advanced");
     }
 
     // --- Beatbox: calibrate a few kicks, then a groove ------------------------
