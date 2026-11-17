@@ -17,7 +17,17 @@ option(M2M_BUILD_TOOLS  "Build offline command-line tools"                   ON)
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(M2MWarnings)
+
 add_subdirectory(core)
+
+# Offline test harness (signal generators, scenarios, metrics, WAV/MIDI/JSON
+# I/O). Shared by the unit tests and tools/m2m-cli, so it builds when either
+# is enabled. Never linked into the plugin.
+if(M2M_BUILD_TESTS OR M2M_BUILD_TOOLS)
+    add_subdirectory(tests/support)
+endif()
 
 if(M2M_BUILD_TESTS)
     FetchContent_Declare(Catch2
