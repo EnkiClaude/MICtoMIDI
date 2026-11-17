@@ -495,7 +495,7 @@ void BeatboxEngine::classifyOnset (const PendingOnset& p, std::int64_t emitSampl
 
         if (numOffs >= static_cast<int> (offs.size()))
         {
-            // Too many held notes: release the oldest now.
+            // Too many held notes (only with very long gates): release one now.
             const auto& o = offs[0];
             out.push ({ MidiEvent::Type::NoteOff, o.channel, o.note, 0, offset });
             offs[0] = offs[static_cast<std::size_t> (numOffs - 1)];

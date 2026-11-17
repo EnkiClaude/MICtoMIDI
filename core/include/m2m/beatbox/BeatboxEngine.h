@@ -34,7 +34,8 @@ struct BeatboxParams
     float highPassHz = 30.0f;          // preprocessing; low so kick lows survive
 };
 
-/** One classified onset (also the calibration captures). */
+/** One detected and classified onset: every onset produces one HitInfo,
+    whether or not MIDI was sent (see accepted / emitted / calibration). */
 struct HitInfo
 {
     std::int64_t onsetSample = 0;   // estimated true onset, absolute samples since reset()
