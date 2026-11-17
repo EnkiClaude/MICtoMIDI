@@ -72,8 +72,12 @@ RunResult runEngine (IEngine& engine, const float* audio, std::size_t numSamples
 
     const auto collect = [&] (std::int64_t blockStart)
     {
-        for (const auto& e : buf)
-            r.events.push_back ({ blockStart + e.sampleOffset, e });
+        for (auto e : buf)
+        {
+            const std::int64_t pos = blockStart + e.sampleOffset;
+            e.sampleOffset = 0;
+            r.events.push_back ({ pos, e });
+        }
         if (buf.size() >= buf.capacity())
             ++r.fullBufferBlocks;
         buf.clear();

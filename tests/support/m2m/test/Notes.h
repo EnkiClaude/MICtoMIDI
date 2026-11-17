@@ -32,7 +32,9 @@ struct DetectedNote
     bool operator== (const DetectedNote&) const = default;
 };
 
-/** A MIDI event at an absolute sample position in the analysed buffer. */
+/** A MIDI event at an absolute sample position in the analysed buffer.
+    event.sampleOffset is always 0 here (the block-relative offset is folded
+    into samplePos), so event lists compare equal across block sizes. */
 struct TimedEvent
 {
     std::int64_t samplePos = 0;
