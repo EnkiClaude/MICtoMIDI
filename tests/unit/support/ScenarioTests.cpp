@@ -18,7 +18,9 @@ TEST_CASE ("support/Scenarios: catalogue")
     const std::vector<std::string> expected {
         "level_bursts",
         "sustained_notes", "chromatic_scale", "major_scale_legato", "vibrato", "glide", "repeated_same_pitch",
-        "weak_fundamental", "dynamics", "noisy_20db_snr", "silence", "noise_only",
+        "weak_fundamental", "dynamics", "noisy_20db_snr", "voice_formants", "low_male_range", "high_range",
+        "fast_16ths_legato", "fast_16ths_detached", "soft_rearticulation", "consonant_onsets", "pitch_drift",
+        "tremolo_vibrato", "scoop_ups", "hum_50hz", "hum_60hz", "silence", "noise_only",
         "kick_only", "snare_only", "closed_hat_only", "open_hat_only", "clap_only",
         "basic_beat_120bpm", "fast_hats_16ths", "beat_dynamics", "beat_noise_floor", "fast_16ths_200bpm",
         "flams_50ms", "voice_kick_only", "voice_snare_only", "voice_closed_hat_only", "voice_open_hat_only",
@@ -26,7 +28,7 @@ TEST_CASE ("support/Scenarios: catalogue")
     };
     REQUIRE (scenarioNames() == expected);
     REQUIRE (scenarioNames (ScenarioCategory::Trigger).size() == 1);
-    REQUIRE (scenarioNames (ScenarioCategory::Melody).size() == 11);
+    REQUIRE (scenarioNames (ScenarioCategory::Melody).size() == 23);
     REQUIRE (scenarioNames (ScenarioCategory::Beatbox).size() == 17);
     REQUIRE (scenarioCatalogue().size() == expected.size());
     REQUIRE (hasScenario ("glide"));

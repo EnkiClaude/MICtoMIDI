@@ -23,7 +23,9 @@ enum class PitchAlgorithm : std::uint8_t { Yin, Mpm };
 struct MelodyParams
 {
     // Pitch detection
-    PitchAlgorithm detector     = PitchAlgorithm::Yin;
+    // MPM: same accuracy as YIN on every m2m-cli scenario, ~10 ms less
+    // latency and less CPU (docs/m2m-cli.md, "Detector choice").
+    PitchAlgorithm detector     = PitchAlgorithm::Mpm;
     float minHz                 = 80.0f;   // >= 50; sets the analysis window (latency!)
     float maxHz                 = 1000.0f;
     float confidenceThreshold   = 0.6f;    // 0..1
@@ -76,8 +78,12 @@ public:
     void process (const float* mono, int numSamples, MidiEventBuffer& out) noexcept override;
     void flush (MidiEventBuffer& out, int sampleOffset = 0) noexcept override;
 
-    /** Typical note-on delay for the current params:
-        window/2 + max (minStable + one median frame, attack window) + one hop. */
+    /** Typical note-on delay for the current params (mid-range voice):
+        detection + max (minStable + one median frame, attack window) + one hop,
+        where detection is window/2 for YIN (it needs the tone in the oldest
+        half of the window) and window/4 for MPM (its normalised
+        autocorrelation is confident once ~2 periods of the tone are in the
+        window; notes near minHz take up to window/2). */
     int latencySamples() const noexcept override;
 
     /** Real-time safe. A note held across a transpose/channel change is

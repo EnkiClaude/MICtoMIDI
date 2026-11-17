@@ -128,7 +128,8 @@ int MelodyEngine::latencySamples() const noexcept
     const auto ms = [this] (float v) { return v > 0.0f ? static_cast<double> (v) * 0.001 * sr : 0.0; };
     const double stable = ms (params.minStableMs) + (params.medianFrames > 1 ? hop : 0);
     const double wait = std::max (stable, ms (params.attackWindowMs));
-    return static_cast<int> (std::lround (windowSize() * 0.5 + wait + hop));
+    const double detection = windowSize() * (params.detector == PitchAlgorithm::Mpm ? 0.25 : 0.5);
+    return static_cast<int> (std::lround (detection + wait + hop));
 }
 
 void MelodyEngine::process (const float* mono, int numSamples, MidiEventBuffer& out) noexcept

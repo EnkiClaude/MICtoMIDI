@@ -675,8 +675,9 @@ namespace
         std::vector<std::string> failures;
         double sumF1 = 0.0, sumOnsetF1 = 0.0, worstF1 = 1.0;
 
-        std::printf ("%-22s %6s %6s %6s %8s %9s %9s %8s %5s %5s\n", "scenario", "P", "R", "F1", "onsetF1",
-                     "onset ms", "latency", "false/m", "oct", "wrong");
+        std::printf ("%-22s %6s %6s %6s %8s %9s %9s %8s %5s %5s %7s\n", "scenario", "P", "R", "F1", "onsetF1",
+                     "onset ms", "latency", "false/m", "oct", "wrong", "cpu %");
+        double sumRt = 0.0;
         for (const auto& name : names)
         {
             const auto sc = makeScenario (name, c.sampleRate);
@@ -690,9 +691,10 @@ namespace
             const auto m = evaluate (sc->notes, r.notes, sc->durationSec(), { tol, true }, sc->glides);
             const auto mo = evaluate (sc->notes, r.notes, sc->durationSec(), { tol, false }, sc->glides);
 
-            std::printf ("%-22s %6.3f %6.3f %6.3f %8.3f %9s %9s %8.2f %5d %5d\n", name.c_str(), m.precision, m.recall,
+            std::printf ("%-22s %6.3f %6.3f %6.3f %8.3f %9s %9s %8.2f %5d %5d %7.3f\n", name.c_str(), m.precision, m.recall,
                          m.f1, mo.f1, fmtMs (m.meanAbsOnsetErrorMs).c_str(), fmtMs (m.meanSignedOnsetErrorMs).c_str(),
-                         m.falseTriggersPerMinute, m.octaveErrors, m.wrongPitch);
+                         m.falseTriggersPerMinute, m.octaveErrors, m.wrongPitch, 100.0 * r.realtimeFactor);
+            sumRt += r.realtimeFactor;
             if (c.dumpHits)
                 printHits (hitLog, sc->sampleRate, &sc->notes, c.toleranceMs);
             printGlideCheck (m);
@@ -732,7 +734,9 @@ namespace
         summary["worstF1"] = worstF1;
         report["scenarios"] = std::move (scenariosJson);
         report["summary"] = std::move (summary);
-        std::printf ("mean F1 %.3f, mean onset-only F1 %.3f, worst F1 %.3f\n", sumF1 / n, sumOnsetF1 / n, worstF1);
+        std::printf ("mean F1 %.3f, mean onset-only F1 %.3f, worst F1 %.3f, mean cpu %.3f %% of one core "
+                     "(wall clock, informational)\n", sumF1 / n, sumOnsetF1 / n, worstF1, 100.0 * sumRt / n);
+        summary["meanRealtimeFactor"] = sumRt / n;
 
         if (baseline)
         {
