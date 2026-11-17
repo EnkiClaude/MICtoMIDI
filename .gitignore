@@ -6,3 +6,6 @@ compile_commands.json
 .vscode/
 .idea/
 *.swp
+
+# Claude Code agent worktrees (local scratch)
+.claude/worktrees/
