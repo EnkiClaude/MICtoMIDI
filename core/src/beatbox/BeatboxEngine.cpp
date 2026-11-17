@@ -14,7 +14,7 @@ namespace
 {
     constexpr float maxWindowMs = 40.0f;
     constexpr float minWindowMs = 10.0f;
-    constexpr float preWindowMs = 5.0f; // pre-onset audio for tail subtraction
+    constexpr float preWindowMs = 12.0f; // pre-onset audio for tail subtraction (long enough to resolve a kick tail)
 
     float finiteOr (float v, float fallback) noexcept { return std::isfinite (v) ? v : fallback; }
 
@@ -79,7 +79,11 @@ void BeatboxEngine::reset() noexcept
     std::fill (ring.begin(), ring.end(), 0.0f);
     pos = 0;
     numPending = 0;
-    numOffs = 0;
+    lastAnchor = -1;
+    // Held notes are not forgotten: their NoteOffs become due immediately
+    // (sent at the start of the next process(), or by flush()).
+    for (int i = 0; i < numOffs; ++i)
+        offs[static_cast<std::size_t> (i)].time = 0;
 }
 
 int BeatboxEngine::latencySamples() const noexcept
@@ -336,10 +340,15 @@ int BeatboxEngine::getRecentHits (HitInfo* out, int max) noexcept
 //==============================================================================
 void BeatboxEngine::flush (MidiEventBuffer& out, int sampleOffset) noexcept
 {
+    // NoteOffs that do not fit stay queued (sent by the next process()/flush()).
+    int kept = 0;
     for (int i = 0; i < numOffs; ++i)
-        out.push ({ MidiEvent::Type::NoteOff, offs[static_cast<std::size_t> (i)].channel,
-                    offs[static_cast<std::size_t> (i)].note, 0, sampleOffset });
-    numOffs = 0;
+    {
+        const auto o = offs[static_cast<std::size_t> (i)];
+        if (! out.push ({ MidiEvent::Type::NoteOff, o.channel, o.note, 0, sampleOffset }))
+            offs[static_cast<std::size_t> (kept++)] = { pos, o.note, o.channel };
+    }
+    numOffs = kept;
 }
 
 void BeatboxEngine::emitNoteOffsUpTo (std::int64_t t, std::int64_t blockStart, MidiEventBuffer& out) noexcept
@@ -356,7 +365,10 @@ void BeatboxEngine::emitNoteOffsUpTo (std::int64_t t, std::int64_t blockStart, M
             return;
 
         const auto& o = offs[static_cast<std::size_t> (best)];
-        out.push ({ MidiEvent::Type::NoteOff, o.channel, o.note, 0, static_cast<std::int32_t> (o.time - blockStart) });
+        // Overdue NoteOffs (buffer was full, or reset()) go out at the block start.
+        const auto offset = static_cast<std::int32_t> (std::max<std::int64_t> (0, o.time - blockStart));
+        if (! out.push ({ MidiEvent::Type::NoteOff, o.channel, o.note, 0, offset }))
+            return; // buffer full: stays queued, retried next block
         offs[static_cast<std::size_t> (best)] = offs[static_cast<std::size_t> (numOffs - 1)];
         --numOffs;
     }
@@ -368,9 +380,16 @@ void BeatboxEngine::process (const float* mono, int numSamples, MidiEventBuffer&
 
     const std::int64_t blockStart = pos;
 
+    // NoteOffs that are overdue (full buffer earlier, or reset()) first.
+    emitNoteOffsUpTo (blockStart, blockStart, out);
+
+    if (mono == nullptr || numSamples <= 0)
+        return;
+
     float peak = 0.0f;
     for (int i = 0; i < numSamples; ++i)
-        peak = std::max (peak, std::abs (mono[i]));
+        if (std::isfinite (mono[i]))
+            peak = std::max (peak, std::abs (mono[i]));
     inputLevelAtomic.store (gainToDb (peak), std::memory_order_relaxed);
 
     const int chunkMax = static_cast<int> (scratch.size());
@@ -394,8 +413,8 @@ void BeatboxEngine::process (const float* mono, int numSamples, MidiEventBuffer&
 
         for (int k = 0; k < got; ++k)
         {
-            if (numPending < static_cast<int> (pending.size()))
-                pending[static_cast<std::size_t> (numPending++)] = { ev[k].samplePosition, ev[k].strength };
+            if (numPending < static_cast<int> (pending.size()) && ! isDuplicateOfAnchor (ev[k].samplePosition))
+                pending[static_cast<std::size_t> (numPending++)] = { ev[k].samplePosition, ev[k].strength, false };
         }
 
         if (pos % hop == 0)
@@ -413,6 +432,26 @@ void BeatboxEngine::handleHop (std::int64_t hopEnd, std::int64_t blockStart, Mid
     int i = 0;
     while (i < numPending)
     {
+        auto& pr = pending[static_cast<std::size_t> (i)];
+        if (pr.onset + windowN <= hopEnd && ! pr.reanchored && reanchor (pr))
+        {
+            // The onset was a quiet lead-in (breath, lip noise) and the sound
+            // proper starts later: wait for its own window, and drop any
+            // onset the detector reported for that same sound.
+            const std::int64_t anchor = pr.onset;
+            lastAnchor = anchor;
+            for (int k = numPending - 1; k >= 0; --k)
+                if (k != i && isDuplicateOfAnchor (pending[static_cast<std::size_t> (k)].onset))
+                {
+                    for (int m = k + 1; m < numPending; ++m)
+                        pending[static_cast<std::size_t> (m - 1)] = pending[static_cast<std::size_t> (m)];
+                    --numPending;
+                    if (k < i)
+                        --i;
+                }
+            ++i;
+            continue;
+        }
         const auto p = pending[static_cast<std::size_t> (i)];
         if (p.onset + windowN <= hopEnd)
         {
@@ -426,6 +465,53 @@ void BeatboxEngine::handleHop (std::int64_t hopEnd, std::int64_t blockStart, Mid
             ++i;
         }
     }
+}
+
+bool BeatboxEngine::isDuplicateOfAnchor (std::int64_t onset) const noexcept
+{
+    if (lastAnchor < 0)
+        return false;
+    const auto refr = static_cast<std::int64_t> (
+        std::lround (std::clamp (finiteOr (params.onset.refractoryMs, 40.0f), 0.0f, 1000.0f) * 0.001 * sr));
+    return onset >= lastAnchor - 2 * hop && onset < lastAnchor + refr;
+}
+
+bool BeatboxEngine::reanchor (PendingOnset& p) const noexcept
+{
+    // ~1 ms peak levels over the analysis window.
+    constexpr int maxBlocks = 64;
+    const int blk = std::max (8, static_cast<int> (std::lround (0.001 * sr)));
+    const int nb = std::min (maxBlocks, windowN / blk);
+    if (nb < 6)
+        return false;
+
+    float lv[maxBlocks];
+    float maxLv = -200.0f;
+    for (int b = 0; b < nb; ++b)
+    {
+        float pk = 0.0f;
+        for (int i = b * blk; i < (b + 1) * blk; ++i)
+            pk = std::max (pk, std::abs (ring[static_cast<std::size_t> ((p.onset + i) & ringMask)]));
+        lv[b] = gainToDb (pk, -160.0f);
+        maxLv = std::max (maxLv, lv[b]);
+    }
+
+    // The sound proper starts at the first block within 15 dB of the
+    // window's maximum. Move the onset there only if at least 3 ms before it
+    // stayed 20 dB or more below that maximum (a quiet lead-in, not a slow
+    // attack of the sound itself).
+    int k = 0;
+    while (k < nb && lv[k] < maxLv - 15.0f)
+        ++k;
+    if (k < 3 || k >= nb)
+        return false;
+    for (int b = 0; b < k; ++b)
+        if (lv[b] > maxLv - 20.0f)
+            return false;
+
+    p.onset += static_cast<std::int64_t> (k) * blk;
+    p.reanchored = true;
+    return true;
 }
 
 void BeatboxEngine::classifyOnset (const PendingOnset& p, std::int64_t emitSample, std::int64_t blockStart,
@@ -480,31 +566,49 @@ void BeatboxEngine::classifyOnset (const PendingOnset& p, std::int64_t emitSampl
         const std::uint8_t ch = mapping.channel();
         const auto offset = static_cast<std::int32_t> (emitSample - blockStart);
 
-        // Retrigger: close a still-held instance of the same note first.
+        // Retrigger: close a still-held instance of the same note first. If
+        // that NoteOff does not fit, the hit is not sent (a second NoteOn on
+        // a sounding note would leave a voice hanging in many synths).
+        bool canSend = true;
         for (int i = 0; i < numOffs; ++i)
         {
             auto& o = offs[static_cast<std::size_t> (i)];
             if (o.note == note && o.channel == ch)
             {
-                out.push ({ MidiEvent::Type::NoteOff, ch, note, 0, offset });
-                o = offs[static_cast<std::size_t> (numOffs - 1)];
-                --numOffs;
+                if (out.push ({ MidiEvent::Type::NoteOff, ch, note, 0, offset }))
+                {
+                    o = offs[static_cast<std::size_t> (numOffs - 1)];
+                    --numOffs;
+                }
+                else
+                {
+                    canSend = false;
+                }
                 break;
             }
         }
 
-        if (numOffs >= static_cast<int> (offs.size()))
+        if (canSend && numOffs >= static_cast<int> (offs.size()))
         {
             // Too many held notes (only with very long gates): release one now.
             const auto& o = offs[0];
-            out.push ({ MidiEvent::Type::NoteOff, o.channel, o.note, 0, offset });
-            offs[0] = offs[static_cast<std::size_t> (numOffs - 1)];
-            --numOffs;
+            if (out.push ({ MidiEvent::Type::NoteOff, o.channel, o.note, 0, offset }))
+            {
+                offs[0] = offs[static_cast<std::size_t> (numOffs - 1)];
+                --numOffs;
+            }
+            else
+            {
+                canSend = false;
+            }
         }
 
-        out.push ({ MidiEvent::Type::NoteOn, ch, note, static_cast<std::uint8_t> (hit.velocity), offset });
-        offs[static_cast<std::size_t> (numOffs++)] = { emitSample + gateSamples, note, ch };
-        hit.emitted = true;
+        // Only a NoteOn that was delivered is held (and gets a NoteOff).
+        if (canSend && out.push ({ MidiEvent::Type::NoteOn, ch, note, static_cast<std::uint8_t> (hit.velocity), offset }))
+        {
+            offs[static_cast<std::size_t> (numOffs++)] = { emitSample + gateSamples, note, ch };
+            hit.emitted = true;
+        }
     }
 
     pushHit (hit);

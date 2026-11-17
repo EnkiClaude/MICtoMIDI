@@ -12,6 +12,7 @@ namespace
     constexpr float kSilentDb = -120.0f;
     constexpr float kStaleAttackMs = 150.0f; // an older level onset no longer counts as this note's attack
     constexpr float kOnsetLatchMs = 40.0f;   // how long an onset waits for a usable frame to retrigger
+    constexpr float kRetriggerDipDb = 3.0f;  // the level must have dipped this much since the note began
 }
 
 void NoteTracker::prepare (double sampleRate) noexcept
@@ -57,6 +58,7 @@ void NoteTracker::reset() noexcept
     attackPeakDb = kSilentDb;
     levelArmed = true;
     latchedOnset = -1;
+    activeMaxDb = activeDipDb = kSilentDb;
     peakWrite = 0;
     peakCount = 0;
 }
@@ -137,10 +139,22 @@ int NoteTracker::process (const TrackerFrame& f, TrackerEvent* out) noexcept
     if (attackStart >= 0 && t - attackStart <= attackSamples)
         attackPeakDb = std::max (attackPeakDb, f.peakDb);
 
+    // Level contour of the sounding note: its maximum so far and the lowest
+    // level since that maximum. A retrigger needs a dip: an amplitude onset
+    // while the note's own attack is still rising (a vowel swelling after a
+    // consonant, a slow attack) is the same note, not a new one.
+    if (st == State::Active)
+    {
+        if (f.levelDb > activeMaxDb)
+            activeMaxDb = activeDipDb = f.levelDb;
+        else
+            activeDipDb = std::min (activeDipDb, f.levelDb);
+    }
+
     // While a note sounds, remember an onset briefly: the detector's confidence
     // often dips during the amplitude step itself, so the retrigger is applied
     // on the next usable frame.
-    if (st == State::Active && f.onset)
+    if (st == State::Active && f.onset && activeMaxDb - activeDipDb >= kRetriggerDipDb)
         latchedOnset = t;
 
     auto tryNoteOn = [&]
@@ -153,6 +167,7 @@ int NoteTracker::process (const TrackerFrame& f, TrackerEvent* out) noexcept
             noteOnTime = t;
             releaseSince = -1;
             latchedOnset = -1;
+            activeMaxDb = activeDipDb = f.levelDb;
             st = State::Active;
         }
     };
@@ -265,6 +280,7 @@ int NoteTracker::process (const TrackerFrame& f, TrackerEvent* out) noexcept
                 note = candidate;
                 candidate = -1;
                 noteOnTime = t;
+                activeMaxDb = activeDipDb = f.levelDb;
             }
             break;
         }

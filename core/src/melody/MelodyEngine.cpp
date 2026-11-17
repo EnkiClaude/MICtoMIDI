@@ -62,6 +62,12 @@ void MelodyEngine::reset() noexcept
     samplesProcessed = 0;
     hopCounter = 0;
     hopPeak = 0.0f;
+    // A note still sounding is released by the next process()/flush().
+    if (sentNote >= 0 && pendingOffNote < 0)
+    {
+        pendingOffNote = sentNote;
+        pendingOffChannel = sentChannel;
+    }
     sentNote = -1;
     lastVel = 0;
     telemetryHz = telemetryMidi = telemetryConfidence = 0.0f;
@@ -128,11 +134,40 @@ int MelodyEngine::latencySamples() const noexcept
     const auto ms = [this] (float v) { return v > 0.0f ? static_cast<double> (v) * 0.001 * sr : 0.0; };
     const double stable = ms (params.minStableMs) + (params.medianFrames > 1 ? hop : 0);
     const double wait = std::max (stable, ms (params.attackWindowMs));
-    return static_cast<int> (std::lround (windowSize() * 0.5 + wait + hop));
+    const double detection = windowSize() * (params.detector == PitchAlgorithm::Mpm ? 0.25 : 0.5);
+    return static_cast<int> (std::lround (detection + wait + hop));
+}
+
+bool MelodyEngine::retryPendingOff (int offset, MidiEventBuffer& out) noexcept
+{
+    if (pendingOffNote < 0)
+        return true;
+    if (! out.push ({ MidiEvent::Type::NoteOff, static_cast<std::uint8_t> (pendingOffChannel),
+                      static_cast<std::uint8_t> (pendingOffNote), 0, offset }))
+        return false;
+    pendingOffNote = -1;
+    return true;
+}
+
+void MelodyEngine::sendNoteOff (int offset, MidiEventBuffer& out) noexcept
+{
+    if (sentNote < 0)
+        return;
+    if (! out.push ({ MidiEvent::Type::NoteOff, static_cast<std::uint8_t> (sentChannel),
+                      static_cast<std::uint8_t> (sentNote), 0, offset }))
+    {
+        pendingOffNote = sentNote;
+        pendingOffChannel = sentChannel;
+    }
+    sentNote = -1;
 }
 
 void MelodyEngine::process (const float* mono, int numSamples, MidiEventBuffer& out) noexcept
 {
+    retryPendingOff (0, out);
+    if (mono == nullptr || numSamples <= 0)
+        return;
+
     const int chunkMax = static_cast<int> (scratch.size());
     int done = 0;
     while (done < numSamples)
@@ -208,26 +243,33 @@ void MelodyEngine::emit (const TrackerEvent& e, int offset, MidiEventBuffer& out
 {
     if (e.noteOn)
     {
-        if (sentNote >= 0) // never two notes at once (defensive; tracker guarantees it)
-            out.push ({ MidiEvent::Type::NoteOff, static_cast<std::uint8_t> (sentChannel),
-                        static_cast<std::uint8_t> (sentNote), 0, offset });
+        sendNoteOff (offset, out); // never two notes at once (legato change: off first)
 
-        sentNote = std::clamp (e.note + params.transpose, 0, 127);
-        sentChannel = std::clamp (params.channel, 1, 16);
+        // A NoteOff still waiting for buffer space must go out first;
+        // otherwise this note is dropped (never two notes at once).
+        if (! retryPendingOff (offset, out))
+            return;
+
+        const int note = std::clamp (e.note + params.transpose, 0, 127);
+        const int channel = std::clamp (params.channel, 1, 16);
         lastVel = velocityMapper.map (e.peakDb);
-        out.push ({ MidiEvent::Type::NoteOn, static_cast<std::uint8_t> (sentChannel),
-                    static_cast<std::uint8_t> (sentNote), static_cast<std::uint8_t> (lastVel), offset });
+        if (out.push ({ MidiEvent::Type::NoteOn, static_cast<std::uint8_t> (channel),
+                        static_cast<std::uint8_t> (note), static_cast<std::uint8_t> (lastVel), offset }))
+        {
+            sentNote = note;
+            sentChannel = channel;
+        }
     }
-    else if (sentNote >= 0)
+    else
     {
-        out.push ({ MidiEvent::Type::NoteOff, static_cast<std::uint8_t> (sentChannel),
-                    static_cast<std::uint8_t> (sentNote), 0, offset });
-        sentNote = -1;
+        sendNoteOff (offset, out);
     }
 }
 
 void MelodyEngine::flush (MidiEventBuffer& out, int sampleOffset) noexcept
 {
+    retryPendingOff (sampleOffset, out);
+
     TrackerEvent events[NoteTracker::maxEventsPerFrame];
     const int count = tracker.flush (samplesProcessed, events);
     for (int i = 0; i < count; ++i)

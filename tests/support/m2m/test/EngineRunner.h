@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace m2m::test
@@ -15,6 +16,11 @@ struct RunOptions
     int blockSize = 256;               // samples per process() call (last block may be shorter)
     std::size_t eventCapacity = 1024;  // MidiEventBuffer capacity per block
     bool flushAtEnd = true;            // call flush() after the last block
+
+    /** Optional: called after every process() call (and after the final
+        flush) with the absolute sample position just past that block, e.g.
+        to drain an engine's diagnostics FIFO. Not timed. */
+    std::function<void (std::int64_t endSample)> afterBlock;
 };
 
 struct RunResult

@@ -10,6 +10,9 @@
 #include "m2m/test/Scenarios.h"
 #include "m2m/test/WavIO.h"
 
+#include "m2m/beatbox/BeatboxEngine.h"
+#include "m2m/melody/MelodyEngine.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -43,6 +46,7 @@ namespace
         std::vector<std::string> positional;
         std::map<std::string, std::string> options;
         std::set<std::string> flags;
+        std::vector<std::pair<std::string, std::string>> sets; // --set key=value (repeatable, in order)
 
         std::string get (const std::string& key, const std::string& fallback = {}) const
         {
@@ -56,7 +60,12 @@ namespace
         "--mode", "--truth", "--out", "--report", "--block", "--tolerance-ms",
         "--scenarios", "--baseline", "--write-baseline", "--sample-rate", "--format",
     };
-    const std::set<std::string> kFlags { "--help", "-h", "--quiet" };
+    const std::set<std::string> kFlags { "--help", "-h", "--quiet", "--dump-hits", "--verbose", "-v" };
+
+    // Shorthands for --set (melody).
+    const std::map<std::string, std::string> kSetAliases {
+        { "--detector", "detector" }, { "--min-hz", "minHz" }, { "--max-hz", "maxHz" },
+    };
 
     bool parseArgs (int argc, char** argv, int first, Args& out, std::string& error)
     {
@@ -66,6 +75,31 @@ namespace
             if (kFlags.count (a) > 0)
             {
                 out.flags.insert (a);
+            }
+            else if (a == "--set")
+            {
+                if (i + 1 >= argc)
+                {
+                    error = "option --set needs key=value";
+                    return false;
+                }
+                const std::string kv = argv[++i];
+                const auto eq = kv.find ('=');
+                if (eq == std::string::npos || eq == 0)
+                {
+                    error = "option --set needs key=value, got '" + kv + "'";
+                    return false;
+                }
+                out.sets.emplace_back (kv.substr (0, eq), kv.substr (eq + 1));
+            }
+            else if (kSetAliases.count (a) > 0)
+            {
+                if (i + 1 >= argc)
+                {
+                    error = "option " + a + " needs a value";
+                    return false;
+                }
+                out.sets.emplace_back (kSetAliases.at (a), argv[++i]);
             }
             else if (kValueOptions.count (a) > 0)
             {
@@ -138,13 +172,20 @@ namespace
             "\n"
             "Usage:\n"
             "  m2m-cli run --mode <trigger|melody|beatbox> <in.wav> [--truth t.json] [--out out.mid]\n"
-            "              [--report r.json] [--block N] [--tolerance-ms T]\n"
+            "              [--report r.json] [--block N] [--tolerance-ms T] [engine options]\n"
             "  m2m-cli gen <scenario|all|all-melody|all-beatbox|all-trigger> --out <dir>\n"
             "              [--sample-rate SR] [--format float32|pcm16]\n"
             "  m2m-cli scenarios\n"
             "  m2m-cli eval --mode <mode> [--scenarios a,b,c|all|all-melody|all-beatbox|all-trigger]\n"
             "              [--report r.json] [--baseline b.json] [--write-baseline b.json]\n"
-            "              [--block N] [--tolerance-ms T] [--sample-rate SR]\n"
+            "              [--block N] [--tolerance-ms T] [--sample-rate SR] [engine options]\n"
+            "  m2m-cli settings --mode <melody|beatbox>      (list the --set keys)\n"
+            "\n"
+            "Engine options (run, eval):\n"
+            "  --set key=value   override an engine parameter (repeatable)\n"
+            "  --detector yin|mpm, --min-hz HZ, --max-hz HZ   melody shorthands for --set\n"
+            "  --dump-hits       beatbox: print every detected onset (time, class, score,\n"
+            "                    accepted, features); -v/--verbose is an alias\n"
             "\n"
             "Exit codes: 0 ok, 1 I/O error, 2 usage error, 3 engine not available,\n"
             "            4 metric regression against --baseline.\n",
@@ -158,6 +199,8 @@ namespace
         int blockSize = 256;
         double toleranceMs = 50.0;
         double sampleRate = 48000.0;
+        m2m::cli::EngineSettings settings;
+        bool dumpHits = false;
     };
 
     bool parseCommon (const Args& args, Common& c, bool needMode)
@@ -188,15 +231,107 @@ namespace
             std::fprintf (stderr, "error: --sample-rate needs a positive number\n");
             return false;
         }
+        c.settings.values = args.sets;
+        c.dumpHits = args.flags.count ("--dump-hits") > 0 || args.flags.count ("--verbose") > 0
+                  || args.flags.count ("-v") > 0;
         return true;
     }
 
-    std::unique_ptr<m2m::IEngine> engineOrComplain (const std::string& mode)
+    /** Creates the engine; prints an error and sets rc on failure. */
+    std::unique_ptr<m2m::IEngine> engineOrComplain (const Common& c, int& rc)
     {
-        auto e = m2m::cli::makeEngine (mode);
+        std::string err;
+        auto e = m2m::cli::makeEngine (c.mode, c.settings, err);
         if (e == nullptr)
-            std::fprintf (stderr, "error: '%s' engine not available in this build\n", mode.c_str());
+        {
+            if (! err.empty())
+            {
+                std::fprintf (stderr, "error: %s\n", err.c_str());
+                rc = kUsage;
+            }
+            else
+            {
+                std::fprintf (stderr, "error: '%s' engine not available in this build\n", c.mode.c_str());
+                rc = kNoEngine;
+            }
+        }
         return e;
+    }
+
+    //==========================================================================
+    // Beatbox hit dump (--dump-hits)
+
+    /** Collects every HitInfo of a BeatboxEngine during a run (drained after
+        each block so the engine's 64-entry FIFO never overflows). */
+    struct HitLog
+    {
+        std::vector<m2m::HitInfo> hits;
+
+        void attach (m2m::IEngine& engine, RunOptions& ro)
+        {
+            auto* bb = dynamic_cast<m2m::BeatboxEngine*> (&engine);
+            if (bb == nullptr)
+                return;
+            ro.afterBlock = [this, bb] (std::int64_t)
+            {
+                m2m::HitInfo buf[64];
+                int n = 0;
+                while ((n = bb->getRecentHits (buf, 64)) > 0)
+                    hits.insert (hits.end(), buf, buf + n);
+            };
+        }
+    };
+
+    void printHits (const HitLog& log, double sampleRate, const std::vector<TruthNote>* truth, double toleranceMs)
+    {
+        std::printf ("  %zu onsets:\n", log.hits.size());
+        std::printf ("    %9s %7s %-10s %5s %3s %3s %-12s", "onset s", "emit ms", "class", "score", "acc", "vel", "truth");
+        for (int f = 0; f < m2m::numFeatures; ++f)
+            std::printf (" %8.8s", m2m::featureName (static_cast<m2m::Feature> (f)));
+        std::printf ("\n");
+        std::vector<bool> used (truth != nullptr ? truth->size() : 0, false);
+        for (const auto& h : log.hits)
+        {
+            const double t = static_cast<double> (h.onsetSample) / sampleRate;
+            std::string tr = "-";
+            if (truth != nullptr)
+            {
+                // nearest truth hit within the tolerance
+                double best = toleranceMs / 1000.0;
+                int bi = -1;
+                for (std::size_t i = 0; i < truth->size(); ++i)
+                {
+                    const double d = std::abs ((*truth)[i].onsetSec - t);
+                    if (d <= best)
+                    {
+                        best = d;
+                        bi = static_cast<int> (i);
+                    }
+                }
+                if (bi >= 0)
+                {
+                    const auto& tn = (*truth)[static_cast<std::size_t> (bi)];
+                    used[static_cast<std::size_t> (bi)] = true;
+                    char b[48];
+                    std::snprintf (b, sizeof (b), "%d %+.1fms", tn.midiNote, 1000.0 * (t - tn.onsetSec));
+                    tr = b;
+                }
+                else
+                    tr = "spurious";
+            }
+            std::printf ("    %9.4f %7.1f %-10s %5.2f %3s %3d %-12s", t,
+                         1000.0 * static_cast<double> (h.emitSample - h.onsetSample) / sampleRate,
+                         m2m::drumClassName (h.cls), static_cast<double> (h.score),
+                         h.calibration ? "cal" : (h.accepted ? "yes" : "no"), h.velocity, tr.c_str());
+            for (int f = 0; f < m2m::numFeatures; ++f)
+                std::printf (" %8.3f", static_cast<double> (h.features[f]));
+            std::printf ("\n");
+        }
+        if (truth != nullptr)
+            for (std::size_t i = 0; i < truth->size(); ++i)
+                if (! used[i])
+                    std::printf ("    MISSED ONSET: truth %d at %.4f s (no onset detected within %.0f ms)\n",
+                                 (*truth)[i].midiNote, (*truth)[i].onsetSec, toleranceMs);
     }
 
     std::string fmtMs (double v)
@@ -218,6 +353,16 @@ namespace
         return j;
     }
 
+    void printGlideCheck (const Metrics& m)
+    {
+        if (m.glideChecks == 0)
+            return;
+        std::printf ("  glide check: %d/%d glides ok, %d passing notes\n", m.glideChecks - m.glideFailures,
+                     m.glideChecks, m.glidePassingNotes);
+        for (const auto& p : m.glideProblems)
+            std::printf ("    %s\n", p.c_str());
+    }
+
     void printMetrics (const Metrics& m, const Metrics& onsetOnly)
     {
         std::printf ("  truth %d, detected %d, matched %d (tolerance %.0f ms)\n",
@@ -230,6 +375,7 @@ namespace
         std::printf ("  offset error: mean |e| %s ms over %d notes\n", fmtMs (m.meanAbsOffsetErrorMs).c_str(), m.offsetPairs);
         std::printf ("  false triggers %.2f/min (%d), octave errors %d, wrong pitch %d\n",
                      m.falseTriggersPerMinute, m.spuriousDetections, m.octaveErrors, m.wrongPitch);
+        printGlideCheck (m);
     }
 
     void printRunInfo (const RunResult& r)
@@ -264,9 +410,10 @@ namespace
             return kUsage;
         }
 
-        auto engine = engineOrComplain (c.mode);
+        int erc = kOk;
+        auto engine = engineOrComplain (c, erc);
         if (engine == nullptr)
-            return kNoEngine;
+            return erc;
 
         const std::string inPath = args.positional[0];
         std::string err;
@@ -292,12 +439,18 @@ namespace
         const auto mono = mixToMono (wav);
         RunOptions ro;
         ro.blockSize = c.blockSize;
+        HitLog hitLog;
+        if (c.dumpHits)
+            hitLog.attach (*engine, ro);
         const auto result = runEngine (*engine, mono, wav.sampleRate, ro);
 
         std::printf ("m2m-cli run: mode %s, '%s' (%.0f Hz, %d ch, %d-bit%s, %.2f s)\n",
                      c.mode.c_str(), inPath.c_str(), wav.sampleRate, wav.numChannels, wav.bitsPerSample,
                      wav.isFloat ? " float" : "", result.durationSec());
         printRunInfo (result);
+        std::printf ("  engine: %s\n", m2m::cli::describeEngine (c.mode, *engine).c_str());
+        if (c.dumpHits)
+            printHits (hitLog, wav.sampleRate, truth ? &truth->notes : nullptr, c.toleranceMs);
         std::printf ("  detected %zu notes\n", result.notes.size());
         const std::size_t maxListed = 20;
         for (std::size_t i = 0; i < result.notes.size() && i < maxListed; ++i)
@@ -311,14 +464,15 @@ namespace
 
         Json report = reportHeader ("run", c);
         report["input"] = inPath;
+        report["engine"] = m2m::cli::describeEngine (c.mode, *engine);
         report["run"] = runInfoToJson (result);
         report["notes"] = notesToJson (result.notes);
 
         if (truth)
         {
             const double tol = c.toleranceMs / 1000.0;
-            const auto m = evaluate (truth->notes, result.notes, result.durationSec(), { tol, true });
-            const auto mo = evaluateOnsets (truth->notes, result.notes, result.durationSec(), tol);
+            const auto m = evaluate (truth->notes, result.notes, result.durationSec(), { tol, true }, truth->glides);
+            const auto mo = evaluate (truth->notes, result.notes, result.durationSec(), { tol, false }, truth->glides);
             printMetrics (m, mo);
             report["truth"] = args.get ("--truth");
             report["metrics"] = metricsToJson (m);
@@ -386,6 +540,20 @@ namespace
             return false;
         }
         return true;
+    }
+
+    int cmdSettings (const Args& args)
+    {
+        const auto mode = args.get ("--mode");
+        const auto keys = m2m::cli::settingKeys (mode);
+        if (keys.empty())
+        {
+            std::fprintf (stderr, "error: settings needs --mode melody or --mode beatbox\n");
+            return kUsage;
+        }
+        for (const auto& [k, h] : keys)
+            std::printf ("%-24s %s\n", k.c_str(), h.c_str());
+        return kOk;
     }
 
     int cmdScenarios()
@@ -461,11 +629,13 @@ namespace
         if (! resolveScenarios (args.get ("--scenarios", "all-" + c.mode), names))
             return kUsage;
 
-        if (m2m::cli::makeEngine (c.mode) == nullptr)
-        {
-            std::fprintf (stderr, "error: '%s' engine not available in this build\n", c.mode.c_str());
-            return kNoEngine;
-        }
+        int erc = kOk;
+        const auto probe = engineOrComplain (c, erc);
+        if (probe == nullptr)
+            return erc;
+        const std::string engineDesc = m2m::cli::describeEngine (c.mode, *probe);
+        if (! c.settings.empty())
+            std::printf ("engine: %s\n", engineDesc.c_str());
 
         std::optional<Baseline> baseline;
         std::string err;
@@ -492,6 +662,7 @@ namespace
         const double tol = c.toleranceMs / 1000.0;
         Json report = reportHeader ("eval", c);
         report["sampleRate"] = c.sampleRate;
+        report["engine"] = engineDesc;
         Json scenariosJson = Json::array();
 
         Baseline newBaseline;
@@ -499,26 +670,37 @@ namespace
         newBaseline.blockSize = c.blockSize;
         newBaseline.toleranceMs = c.toleranceMs;
         if (baseline)
+        {
             newBaseline.tolerance = baseline->tolerance;
+            newBaseline.limits = baseline->limits;
+        }
 
         std::vector<std::string> failures;
         double sumF1 = 0.0, sumOnsetF1 = 0.0, worstF1 = 1.0;
 
-        std::printf ("%-22s %6s %6s %6s %8s %9s %9s %8s %5s %5s\n", "scenario", "P", "R", "F1", "onsetF1",
-                     "onset ms", "latency", "false/m", "oct", "wrong");
+        std::printf ("%-22s %6s %6s %6s %8s %9s %9s %8s %5s %5s %7s\n", "scenario", "P", "R", "F1", "onsetF1",
+                     "onset ms", "latency", "false/m", "oct", "wrong", "cpu %");
+        double sumRt = 0.0;
         for (const auto& name : names)
         {
             const auto sc = makeScenario (name, c.sampleRate);
-            auto engine = m2m::cli::makeEngine (c.mode);
+            auto engine = m2m::cli::makeEngine (c.mode, c.settings, err);
             RunOptions ro;
             ro.blockSize = c.blockSize;
+            HitLog hitLog;
+            if (c.dumpHits)
+                hitLog.attach (*engine, ro);
             const auto r = runEngine (*engine, sc->audio, sc->sampleRate, ro);
-            const auto m = evaluate (sc->notes, r.notes, sc->durationSec(), { tol, true });
-            const auto mo = evaluateOnsets (sc->notes, r.notes, sc->durationSec(), tol);
+            const auto m = evaluate (sc->notes, r.notes, sc->durationSec(), { tol, true }, sc->glides);
+            const auto mo = evaluate (sc->notes, r.notes, sc->durationSec(), { tol, false }, sc->glides);
 
-            std::printf ("%-22s %6.3f %6.3f %6.3f %8.3f %9s %9s %8.2f %5d %5d\n", name.c_str(), m.precision, m.recall,
+            std::printf ("%-22s %6.3f %6.3f %6.3f %8.3f %9s %9s %8.2f %5d %5d %7.3f\n", name.c_str(), m.precision, m.recall,
                          m.f1, mo.f1, fmtMs (m.meanAbsOnsetErrorMs).c_str(), fmtMs (m.meanSignedOnsetErrorMs).c_str(),
-                         m.falseTriggersPerMinute, m.octaveErrors, m.wrongPitch);
+                         m.falseTriggersPerMinute, m.octaveErrors, m.wrongPitch, 100.0 * r.realtimeFactor);
+            sumRt += r.realtimeFactor;
+            if (c.dumpHits)
+                printHits (hitLog, sc->sampleRate, &sc->notes, c.toleranceMs);
+            printGlideCheck (m);
 
             sumF1 += m.f1;
             sumOnsetF1 += mo.f1;
@@ -532,6 +714,10 @@ namespace
             scenariosJson.push (std::move (s));
 
             newBaseline.scenarios[name] = makeBaselineEntry (m, newBaseline.tolerance);
+            if (baseline)
+                if (const auto it = baseline->scenarios.find (name); it != baseline->scenarios.end())
+                    newBaseline.scenarios[name].knownLimitation = it->second.knownLimitation;
+            applyLimits (newBaseline.scenarios[name], newBaseline.limits);
 
             if (baseline)
             {
@@ -552,7 +738,9 @@ namespace
         summary["worstF1"] = worstF1;
         report["scenarios"] = std::move (scenariosJson);
         report["summary"] = std::move (summary);
-        std::printf ("mean F1 %.3f, mean onset-only F1 %.3f, worst F1 %.3f\n", sumF1 / n, sumOnsetF1 / n, worstF1);
+        std::printf ("mean F1 %.3f, mean onset-only F1 %.3f, worst F1 %.3f, mean cpu %.3f %% of one core "
+                     "(wall clock, informational)\n", sumF1 / n, sumOnsetF1 / n, worstF1, 100.0 * sumRt / n);
+        summary["meanRealtimeFactor"] = sumRt / n;
 
         if (baseline)
         {
@@ -639,6 +827,7 @@ int main (int argc, char** argv)
     if (cmd == "run")       return cmdRun (args);
     if (cmd == "gen")       return cmdGen (args);
     if (cmd == "scenarios") return cmdScenarios();
+    if (cmd == "settings")  return cmdSettings (args);
     if (cmd == "eval")      return cmdEval (args);
 
     std::fprintf (stderr, "error: unknown command '%s'\n", cmd.c_str());

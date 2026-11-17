@@ -1,5 +1,7 @@
 #include "m2m/test/Metrics.h"
 
+#include <cstdio>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -200,6 +202,85 @@ Metrics evaluate (const std::vector<TruthNote>& truth, const std::vector<Detecte
         }
 
     m.falseTriggersPerMinute = m.durationSec > 0.0 ? m.spuriousDetections * 60.0 / m.durationSec : 0.0;
+    return m;
+}
+
+Metrics evaluate (const std::vector<TruthNote>& truth, const std::vector<DetectedNote>& detected,
+                  double durationSec, const MatchOptions& options, const std::vector<GlideSegment>& glides)
+{
+    if (glides.empty())
+        return evaluate (truth, detected, durationSec, options);
+
+    const double tol = options.onsetToleranceSec;
+    const auto between = [] (int n, int a, int b) { return n > std::min (a, b) && n < std::max (a, b); };
+
+    std::vector<DetectedNote> kept;
+    int passing = 0;
+    for (const auto& d : detected)
+    {
+        bool isPassing = false;
+        for (const auto& g : glides)
+            if (d.onsetSec > g.startSec && d.onsetSec <= g.endSec + tol && between (d.midiNote, g.fromNote, g.toNote))
+                isPassing = true;
+        if (isPassing)
+            ++passing;
+        else
+            kept.push_back (d);
+    }
+
+    auto m = evaluate (truth, kept, durationSec, options);
+    m.numDetected = static_cast<int> (detected.size()); // informational: all detections
+    m.glidePassingNotes = passing;
+
+    std::vector<DetectedNote> sorted = detected;
+    std::stable_sort (sorted.begin(), sorted.end(),
+                      [] (const DetectedNote& a, const DetectedNote& b) { return a.onsetSec < b.onsetSec; });
+
+    for (const auto& g : glides)
+    {
+        ++m.glideChecks;
+        const double from = g.startSec, to = g.endSec + tol;
+        std::vector<const DetectedNote*> seq;
+        for (const auto& d : sorted)
+            if (d.onsetSec < to && d.offsetSec > from)
+                seq.push_back (&d);
+
+        char where[64];
+        std::snprintf (where, sizeof (where), "glide %d->%d at %.3f s: ", g.fromNote, g.toNote, g.startSec);
+        std::vector<std::string> problems;
+        const int dir = g.toNote > g.fromNote ? 1 : -1;
+        const int span = std::abs (g.toNote - g.fromNote);
+
+        if (seq.empty())
+            problems.push_back ("no note sounding");
+        else
+        {
+            if (seq.front()->midiNote != g.fromNote)
+                problems.push_back ("first note " + std::to_string (seq.front()->midiNote) + " is not the start note");
+            if (seq.back()->midiNote != g.toNote)
+                problems.push_back ("last note " + std::to_string (seq.back()->midiNote) + " is not the end note");
+            if (static_cast<int> (seq.size()) > span + 1)
+                problems.push_back (std::to_string (seq.size()) + " notes for a " + std::to_string (span) + "-semitone glide");
+            for (std::size_t i = 1; i < seq.size(); ++i)
+            {
+                const auto& a = *seq[i - 1];
+                const auto& b = *seq[i];
+                if ((b.midiNote - a.midiNote) * dir <= 0)
+                    problems.push_back ("not monotonic (" + std::to_string (a.midiNote) + " then " + std::to_string (b.midiNote) + ")");
+                if (b.onsetSec < a.offsetSec - 1.0e-6)
+                    problems.push_back ("two notes at once at " + std::to_string (b.onsetSec) + " s");
+                else if (b.onsetSec - a.offsetSec > 0.001)
+                    problems.push_back ("gap of " + std::to_string (1000.0 * (b.onsetSec - a.offsetSec)) + " ms");
+            }
+        }
+
+        if (! problems.empty())
+        {
+            ++m.glideFailures;
+            for (const auto& p : problems)
+                m.glideProblems.push_back (where + p);
+        }
+    }
     return m;
 }
 

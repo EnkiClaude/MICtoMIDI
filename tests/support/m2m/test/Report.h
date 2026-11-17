@@ -5,6 +5,7 @@
 #include "m2m/test/Metrics.h"
 #include "m2m/test/Notes.h"
 
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -32,6 +33,7 @@ struct TruthFile
     double sampleRate = 0.0;
     double durationSec = 0.0;
     std::vector<TruthNote> notes;   // sorted by onset after reading
+    std::vector<GlideSegment> glides; // optional "glides": [{ startSec, endSec, fromNote, toNote }]
 };
 
 Json truthToJson (const TruthFile& truth);
@@ -89,6 +91,22 @@ struct BaselineEntry
     double minF1 = 0.0;
     double maxMeanAbsOnsetErrorMs = 0.0;
     double maxFalseTriggersPerMinute = 0.0;
+    double maxGlideFailures = std::numeric_limits<double>::quiet_NaN(); // only for scenarios with glides
+
+    /** Free text kept through --write-baseline: why a gate is looser than
+        PLAN.md asks for (a known limitation). Empty for normal entries. */
+    std::string knownLimitation;
+};
+
+/** Requirements the gates may never be looser than (PLAN.md targets), e.g.
+    { "minF1": 0.9, "maxMeanAbsOnsetErrorMs": 30 }. When a baseline is
+    written, measured -/+ tolerance is clamped to these, except for entries
+    marked as a knownLimitation. NaN = no limit. */
+struct BaselineLimits
+{
+    double minF1 = std::numeric_limits<double>::quiet_NaN();
+    double maxMeanAbsOnsetErrorMs = std::numeric_limits<double>::quiet_NaN();
+    double maxFalseTriggersPerMinute = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct Baseline
@@ -97,8 +115,12 @@ struct Baseline
     int blockSize = 256;
     double toleranceMs = 50.0;
     BaselineTolerance tolerance;
+    BaselineLimits limits;
     std::map<std::string, BaselineEntry> scenarios;
 };
+
+/** Clamp an entry's gates to the limits (no-op for known limitations). */
+void applyLimits (BaselineEntry& e, const BaselineLimits& limits);
 
 /** Entry for measured metrics: gates = measured -/+ tolerance (F1 floor at 0). */
 BaselineEntry makeBaselineEntry (const Metrics& m, const BaselineTolerance& tol);

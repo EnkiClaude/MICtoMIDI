@@ -23,20 +23,33 @@ jobs:
         run: build/tools/m2m-cli/m2m-cli eval --mode trigger --scenarios level_bursts --report build/m2m-eval-trigger.json
 
       # ---- Metric regression gates (PLAN.md §9, Phase 2) -------------------
-      # Enable once the melody/beatbox engines are wired into
-      # tools/m2m-cli/EngineFactory.cpp and baselines are committed. Create a
-      # baseline with:  m2m-cli eval --mode melody --write-baseline tests/baselines/melody.json
-      # A metric past its stored tolerance makes m2m-cli exit 4 and fails CI.
-      #
-      # - name: Melody regression gate
-      #   run: build/tools/m2m-cli/m2m-cli eval --mode melody --scenarios all-melody --baseline tests/baselines/melody.json --report build/m2m-eval-melody.json
-      # - name: Beatbox regression gate
-      #   run: build/tools/m2m-cli/m2m-cli eval --mode beatbox --scenarios all-beatbox --baseline tests/baselines/beatbox.json --report build/m2m-eval-beatbox.json
-      # - uses: actions/upload-artifact@v4
-      #   if: always()
-      #   with:
-      #     name: m2m-eval-reports
-      #     path: build/m2m-eval-*.json
+      # (ctest above runs the same gates; these steps also keep the reports.)
+      # A metric past its stored gate makes m2m-cli exit 4 and fails CI.
+      # Update a baseline after an intended change with
+      #   m2m-cli eval --mode melody --baseline tests/baselines/melody.json --write-baseline tests/baselines/melody.json
+      - name: Melody regression gate
+        run: build/tools/m2m-cli/m2m-cli eval --mode melody --scenarios all-melody --baseline tests/baselines/melody.json --report build/m2m-eval-melody.json
+      - name: Beatbox regression gate
+        run: build/tools/m2m-cli/m2m-cli eval --mode beatbox --scenarios all-beatbox --baseline tests/baselines/beatbox.json --report build/m2m-eval-beatbox.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m2m-eval-reports
+          path: build/m2m-eval-*.json
+
+  core-clang:
+    name: Core library + gates with clang (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja + clang
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DM2M_BUILD_PLUGIN=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+      - name: Build
+        run: cmake --build build
+      - name: Test (unit tests, real-time safety, regression gates)
+        run: ctest --test-dir build --output-on-failure
 
   plugin-linux:
     name: Plugin build + pluginval (Linux)

@@ -24,7 +24,7 @@ enum class ClassifierMode : int { Rules, Calibrated };
 struct BeatboxParams
 {
     OnsetParams onset;                 // sensitivity 0..1, refractoryMs (40), minLevelDb (-45)
-    float analysisWindowMs = 20.0f;    // 10..40: audio after the onset used for classification
+    float analysisWindowMs = 18.0f;    // 10..40: audio after the onset used for classification (18: hit <= 20 ms, PLAN 3)
     ClassifierMode classifierMode = ClassifierMode::Rules; // Calibrated falls back to Rules until usable
     ClassifierParams classifier;       // per-class sensitivity / enabled, minScore
     float gateMs = 60.0f;              // NoteOn -> NoteOff (1..2000)
@@ -56,6 +56,13 @@ struct HitInfo
     from an internal ring buffer -> FeatureExtractor -> Rule or Calibrated
     classifier -> DrumMapping -> NoteOn (velocity = peak in the first
     velocityWindowMs) and a NoteOff gateMs later.
+
+    Held notes: only a NoteOn that fitted into the MidiEventBuffer counts as
+    sounding; a NoteOff that does not fit stays queued and is retried at the
+    next process()/flush() (a retrigger of that note waits for it). reset()
+    and prepare() emit nothing but keep the queued NoteOffs and send them at
+    the start of the next process() (or in flush()). So every delivered
+    NoteOn gets a NoteOff, even with a tiny buffer.
 
     Timing: analysis runs on an internal fixed hop (64 samples @ 48 kHz), so
     the output is identical for any host block size. The NoteOn is placed on
@@ -143,7 +150,7 @@ private:
     enum class CmdType : int { Begin, End, Cancel, Clear, ClearAll };
     struct Command { CmdType type; int cls; };
 
-    struct PendingOnset { std::int64_t onset; float strength; };
+    struct PendingOnset { std::int64_t onset; float strength; bool reanchored; };
     struct PendingOff { std::int64_t time; std::uint8_t note, channel; };
 
     // states of the two lock-free mailboxes
@@ -159,6 +166,8 @@ private:
     void handleHop (std::int64_t hopEnd, std::int64_t blockStart, MidiEventBuffer& out) noexcept;
     void classifyOnset (const PendingOnset& p, std::int64_t emitSample, std::int64_t blockStart,
                         MidiEventBuffer& out) noexcept;
+    bool reanchor (PendingOnset& p) const noexcept;
+    bool isDuplicateOfAnchor (std::int64_t onset) const noexcept;
     void emitNoteOffsUpTo (std::int64_t t, std::int64_t blockStart, MidiEventBuffer& out) noexcept;
     void pushHit (const HitInfo& h) noexcept;
 
@@ -184,6 +193,7 @@ private:
 
     std::array<PendingOnset, 16> pending {};
     int numPending = 0;
+    std::int64_t lastAnchor = -1;   // last re-anchored onset (dedupe of the detector's own report)
     std::array<PendingOff, 32> offs {};
     int numOffs = 0;
 

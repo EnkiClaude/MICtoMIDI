@@ -10,3 +10,10 @@ m2m_enable_warnings(m2m_tests)
 
 include(Catch)
 catch_discover_tests(m2m_tests)
+
+# Real-time safety: replaces the global operator new/delete, so it is a
+# separate executable (the override must not affect the other tests).
+add_executable(m2m_rt_tests rt/AllocationTests.cpp)
+target_link_libraries(m2m_rt_tests PRIVATE m2m_testsupport mictomidi_core)
+m2m_enable_warnings(m2m_rt_tests)
+add_test(NAME m2m_rt_no_allocation COMMAND m2m_rt_tests)

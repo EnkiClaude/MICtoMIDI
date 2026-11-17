@@ -16,4 +16,11 @@ if(M2M_BUILD_TESTS)
                      -DCLI=$<TARGET_FILE:m2m-cli>
                      -DOUT=${CMAKE_CURRENT_BINARY_DIR}/smoke
                      -P ${CMAKE_CURRENT_SOURCE_DIR}/SmokeTest.cmake)
+
+    # Metric regression gates (PLAN.md section 9): exit code 4 on a regression.
+    # Deterministic: no wall-clock metric is gated.
+    add_test(NAME m2m_cli_gate_melody
+             COMMAND m2m-cli eval --mode melody --baseline ${PROJECT_SOURCE_DIR}/tests/baselines/melody.json)
+    add_test(NAME m2m_cli_gate_beatbox
+             COMMAND m2m-cli eval --mode beatbox --baseline ${PROJECT_SOURCE_DIR}/tests/baselines/beatbox.json)
 endif()

@@ -160,3 +160,47 @@ TEST_CASE ("support/Metrics: empty inputs")
     const auto implied = evaluate ({}, { det (29.0, 30.0, 60) }, 0.0);
     REQUIRE_THAT (implied.durationSec, WithinAbs (30.0, 1e-12));
 }
+
+TEST_CASE ("support/Metrics: glide check")
+{
+    // 60 -> 64 glide from 1.0 to 1.2 s; truth: 60 until 1.0, 64 from 1.2.
+    const std::vector<TruthNote> truth { { 0.5, 1.0, 60 }, { 1.2, 2.0, 64 } };
+    const std::vector<GlideSegment> glides { { 1.0, 1.2, 60, 64 } };
+    const MatchOptions opt { 0.05, true };
+
+    // Legato chromatic steps: passing notes are neither hits nor false triggers.
+    const std::vector<DetectedNote> steps { det (0.52, 1.06, 60), det (1.06, 1.12, 62), det (1.12, 1.23, 63),
+                                            det (1.23, 2.0, 64) };
+    auto m = evaluate (truth, steps, 3.0, opt, glides);
+    CHECK (m.f1 == 1.0);
+    CHECK (m.spuriousDetections == 0);
+    CHECK (m.glideChecks == 1);
+    CHECK (m.glideFailures == 0);
+    CHECK (m.glidePassingNotes == 2);
+
+    // Direct jump (no passing notes) is fine too.
+    m = evaluate (truth, { det (0.52, 1.2, 60), det (1.2, 2.0, 64) }, 3.0, opt, glides);
+    CHECK (m.f1 == 1.0);
+    CHECK (m.glideFailures == 0);
+
+    // Not monotonic.
+    m = evaluate (truth, { det (0.52, 1.06, 60), det (1.06, 1.1, 62), det (1.1, 1.15, 61), det (1.15, 2.0, 64) },
+                  3.0, opt, glides);
+    CHECK (m.glideFailures == 1);
+
+    // Gap between notes.
+    m = evaluate (truth, { det (0.52, 1.06, 60), det (1.1, 2.0, 64) }, 3.0, opt, glides);
+    CHECK (m.glideFailures == 1);
+
+    // Two notes at once.
+    m = evaluate (truth, { det (0.52, 1.15, 60), det (1.1, 2.0, 64) }, 3.0, opt, glides);
+    CHECK (m.glideFailures == 1);
+
+    // Wrong end note (and a missed truth note).
+    m = evaluate (truth, { det (0.52, 1.2, 60), det (1.2, 2.0, 65) }, 3.0, opt, glides);
+    CHECK (m.glideFailures == 1);
+    CHECK (m.f1 < 1.0);
+
+    // Without glides the plain evaluation is used.
+    CHECK (evaluate (truth, steps, 3.0, opt, {}).f1 < 1.0);
+}

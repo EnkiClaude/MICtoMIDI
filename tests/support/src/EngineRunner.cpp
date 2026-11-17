@@ -95,12 +95,16 @@ RunResult runEngine (IEngine& engine, const float* audio, std::size_t numSamples
         maxSec = std::max (maxSec, dt);
         ++r.numBlocks;
         collect (static_cast<std::int64_t> (start));
+        if (options.afterBlock)
+            options.afterBlock (static_cast<std::int64_t> (start) + n);
     }
 
     if (options.flushAtEnd)
     {
         engine.flush (buf, 0);
         collect (r.numSamples);
+        if (options.afterBlock)
+            options.afterBlock (r.numSamples);
     }
 
     r.totalProcessSec = total;

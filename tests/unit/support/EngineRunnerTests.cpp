@@ -60,7 +60,7 @@ TEST_CASE ("support/EngineRunner: absolute positions, flush and pairing")
         INFO ("block " << block);
         ScriptedEngine e;
         const std::vector<float> audio (10000, 0.0f);
-        const auto r = runEngine (e, audio, 1000.0, { block, 16, true });
+        const auto r = runEngine (e, audio, 1000.0, { block, 16, true, {} });
 
         REQUIRE (e.prepared);
         REQUIRE (e.resets == 1);
@@ -83,7 +83,7 @@ TEST_CASE ("support/EngineRunner: absolute positions, flush and pairing")
 
     // Without flush the held note ends at the end of the buffer.
     ScriptedEngine e;
-    const auto r = runEngine (e, std::vector<float> (8000, 0.0f), 1000.0, { 256, 16, false });
+    const auto r = runEngine (e, std::vector<float> (8000, 0.0f), 1000.0, { 256, 16, false, {} });
     REQUIRE (r.events.size() == 5);
     REQUIRE (r.notes.back() == DetectedNote { 7.0, 8.0, 50, 2, 70 });
 }
@@ -118,7 +118,7 @@ TEST_CASE ("support/EngineRunner: LevelTriggerEngine on level_bursts is perfect 
     {
         INFO ("block " << block);
         m2m::LevelTriggerEngine engine;
-        const auto r = runEngine (engine, sc->audio, sc->sampleRate, { block, 256, true });
+        const auto r = runEngine (engine, sc->audio, sc->sampleRate, { block, 256, true, {} });
         const auto m = evaluate (sc->notes, r.notes, sc->durationSec());
 
         REQUIRE (m.f1 == 1.0);

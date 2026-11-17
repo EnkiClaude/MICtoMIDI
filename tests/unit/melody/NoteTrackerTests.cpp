@@ -182,12 +182,25 @@ TEST_CASE ("NoteTracker: onset retriggers the same note; can be disabled", "[mel
         p.retriggerEnabled = enabled;
         Recorder r (p);
         r.frames (40, 57.0f);
-        r.frame (57.0f, -12.0f, true);
+        r.frames (3, 57.0f, -18.0f); // the level dips between the syllables ...
+        r.frame (57.0f, -12.0f, true); // ... and rises again
         r.frames (40, 57.0f);
         r.flush();
         CHECK (r.invariants());
         CHECK (r.ons() == (enabled ? std::vector<int> { 57, 57 } : std::vector<int> { 57 }));
     }
+}
+
+TEST_CASE ("NoteTracker: an onset during the note's own rising attack is no retrigger", "[melody][tracker]")
+{
+    // e.g. a vowel swelling after a consonant: the level only ever rises.
+    Recorder r;
+    for (int i = 0; i < 30; ++i)
+        r.frame (57.0f, -40.0f + static_cast<float> (i), i == 12);
+    r.frames (40, 57.0f, -10.0f);
+    r.flush();
+    CHECK (r.invariants());
+    CHECK (r.ons() == std::vector<int> { 57 });
 }
 
 TEST_CASE ("NoteTracker: scale snap picks allowed notes", "[melody][tracker]")

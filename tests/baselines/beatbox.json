@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "mode": "beatbox",
+  "blockSize": 256,
+  "toleranceMs": 50,
+  "tolerance": {
+    "f1": 0.02,
+    "onsetErrorMs": 2,
+    "falseTriggersPerMinute": 1
+  },
+  "limits": {
+    "minF1": 0.95,
+    "maxMeanAbsOnsetErrorMs": 20,
+    "maxFalseTriggersPerMinute": 0.5
+  },
+  "scenarios": {
+    "basic_beat_120bpm": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.31249999999996,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "beat_dynamics": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.479166666666636,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "beat_noise_floor": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.31250000000007,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "clap_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 17.979166666666657,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 19.979166666666657,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "closed_hat_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 17.979166666666657,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 19.979166666666657,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "fast_16ths_200bpm": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.479166666666654,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "fast_hats_16ths": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.479166666666636,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "flams_50ms": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.3125,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "kick_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 17.979166666666657,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 19.979166666666657,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "open_hat_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 17.979166666666657,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 19.979166666666657,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "snare_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 17.979166666666657,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 19.979166666666657,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "voice_beat_100bpm": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.20138888888884,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "voice_clap_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.53472222222227,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "voice_closed_hat_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.645833333333407,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "voice_kick_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.20138888888894,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "voice_open_hat_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.645833333333407,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "voice_snare_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 18.645833333333407,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 20,
+      "maxFalseTriggersPerMinute": 0.5
+    }
+  }
+}

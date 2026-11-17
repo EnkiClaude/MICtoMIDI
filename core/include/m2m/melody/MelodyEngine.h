@@ -23,7 +23,9 @@ enum class PitchAlgorithm : std::uint8_t { Yin, Mpm };
 struct MelodyParams
 {
     // Pitch detection
-    PitchAlgorithm detector     = PitchAlgorithm::Yin;
+    // MPM: same accuracy as YIN on every m2m-cli scenario, ~10 ms less
+    // latency and less CPU (docs/m2m-cli.md, "Detector choice").
+    PitchAlgorithm detector     = PitchAlgorithm::Mpm;
     float minHz                 = 80.0f;   // >= 50; sets the analysis window (latency!)
     float maxHz                 = 1000.0f;
     float confidenceThreshold   = 0.6f;    // 0..1
@@ -65,7 +67,14 @@ struct MelodyParams
 
     Events are stamped at the sample that completed their analysis hop, so
     output is identical for any host block size. process()/setParams() never
-    allocate, lock or do I/O. */
+    allocate, lock or do I/O.
+
+    Held notes are tracked by what was actually delivered: a NoteOn that does
+    not fit into the MidiEventBuffer is not considered sounding, and a NoteOff
+    that does not fit is retried at the start of the next process() or
+    flush() (no new note starts before it is out). reset() and prepare()
+    do not emit, but a note sounding at that moment is released at the start
+    of the next process()/flush(). So every delivered NoteOn gets a NoteOff. */
 class MelodyEngine final : public IEngine
 {
 public:
@@ -76,8 +85,12 @@ public:
     void process (const float* mono, int numSamples, MidiEventBuffer& out) noexcept override;
     void flush (MidiEventBuffer& out, int sampleOffset = 0) noexcept override;
 
-    /** Typical note-on delay for the current params:
-        window/2 + max (minStable + one median frame, attack window) + one hop. */
+    /** Typical note-on delay for the current params (mid-range voice):
+        detection + max (minStable + one median frame, attack window) + one hop,
+        where detection is window/2 for YIN (it needs the tone in the oldest
+        half of the window) and window/4 for MPM (its normalised
+        autocorrelation is confident once ~2 periods of the tone are in the
+        window; notes near minHz take up to window/2). */
     int latencySamples() const noexcept override;
 
     /** Real-time safe. A note held across a transpose/channel change is
@@ -101,6 +114,8 @@ private:
     void applyParams() noexcept;
     void analyseFrame (int offsetInBlock, MidiEventBuffer& out) noexcept;
     void emit (const TrackerEvent& e, int offset, MidiEventBuffer& out) noexcept;
+    void sendNoteOff (int offset, MidiEventBuffer& out) noexcept;
+    bool retryPendingOff (int offset, MidiEventBuffer& out) noexcept;
     IPitchDetector& detector() noexcept;
 
     MelodyParams params;
@@ -129,6 +144,10 @@ private:
 
     int sentNote = -1;
     int sentChannel = 1;
+    // A NoteOff that did not fit into the output buffer (or a note still
+    // sounding at reset()): sent first thing in the next process()/flush().
+    int pendingOffNote = -1;
+    int pendingOffChannel = 1;
     int lastVel = 0;
 
     float telemetryHz = 0.0f, telemetryMidi = 0.0f, telemetryConfidence = 0.0f;

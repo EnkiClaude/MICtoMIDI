@@ -107,6 +107,7 @@ FeatureVector FeatureExtractor::extract (const float* window, int n, const float
     // Spectrum of what was already sounding just before the onset, scaled to
     // the window's length, so it can be subtracted (a hat on a kick's tail).
     preScale = 0.0;
+    preEnergy = 0.0;
     preN = pre != nullptr ? std::min (preN, maxN) : 0;
     if (preN >= 16)
     {
@@ -117,13 +118,16 @@ FeatureVector FeatureExtractor::extract (const float* window, int n, const float
         }
         std::fill (frame.begin(), frame.end(), 0.0f);
         float prePeak = 0.0f;
+        double preSum = 0.0;
         for (int i = 0; i < preN; ++i)
         {
+            preSum += static_cast<double> (pre[i]) * pre[i];
             frame[static_cast<std::size_t> (i)] = pre[i] * preHann[static_cast<std::size_t> (i)];
             prePeak = std::max (prePeak, std::abs (pre[i]));
         }
         if (prePeak > 0.0f)
         {
+            preEnergy = preSum / preN;
             fft.magnitudes (frame.data(), preMags.data());
             preScale = sumSquares (hann, n) / sumSquares (preHann, preN);
         }
@@ -219,16 +223,14 @@ void FeatureExtractor::computeSpectral (int n, FeatureVector& f) noexcept
 
 void FeatureExtractor::computeTemporal (const float* x, int n, FeatureVector& f) noexcept
 {
-    double energy = 0.0, e1 = 0.0, e2 = 0.0;
+    double energy = 0.0;
     float peak = 0.0f;
     int crossings = 0;
-    const int half = n / 2;
 
     for (int i = 0; i < n; ++i)
     {
         const double v = x[i];
         energy += v * v;
-        (i < half ? e1 : e2) += v * v;
         peak = std::max (peak, std::abs (x[i]));
         if (i > 0 && ((x[i - 1] < 0.0f) != (x[i] < 0.0f)))
             ++crossings;
@@ -239,10 +241,6 @@ void FeatureExtractor::computeTemporal (const float* x, int n, FeatureVector& f)
     f[Feature::LevelDb] = powerDb (energy / n);
     f[Feature::CrestDb] = rms > 0.0 ? static_cast<float> (20.0 * std::log10 (std::max (1.0, peak / rms))) : 0.0f;
     f[Feature::ZeroCrossingRate] = static_cast<float> (crossings / ms);
-    // Scaled to a 20 ms window (dB per 10 ms between the half centres), so the
-    // same thresholds work for any window length.
-    const float decay = powerDb (e2 + tiny) - powerDb (e1 + tiny);
-    f[Feature::EarlyDecayDb] = std::clamp (decay * static_cast<float> (20.0 / ms), -60.0f, 20.0f);
 
     // Envelope in ~1 ms blocks of a 1 kHz high-passed copy (2nd order), with
     // a peak hold that decays 2 dB/ms. The high-pass removes the low-frequency
@@ -291,24 +289,63 @@ void FeatureExtractor::computeTemporal (const float* x, int n, FeatureVector& f)
     }
     f[Feature::AttackMs] = static_cast<float> ((maxBlock + 0.5) * blk * 1000.0 / sr);
 
-    // Sub-onsets: rises of >= 8 dB above the running minimum of the HP
-    // envelope, >= 4 ms apart, within 30 dB of the loudest block.
+    // Early decay: energy of the last quarter of the window against the
+    // middle (35-60 %), in dB per 10 ms between the segment centres. Skipping
+    // the first third keeps the attack out of it: a "t" click in front of a
+    // "sss", or a fricative that takes a few ms to build up, would otherwise
+    // read as decay (or hide it).
+    {
+        const int m0 = (n * 35) / 100, m1 = (n * 60) / 100, t0 = (n * 75) / 100;
+        double em = 0.0, et = 0.0;
+        for (int i = m0; i < m1; ++i)
+            em += static_cast<double> (x[i]) * x[i];
+        for (int i = t0; i < n; ++i)
+            et += static_cast<double> (x[i]) * x[i];
+        if (m1 > m0 && n > t0)
+        {
+            // Remove what was already sounding before the onset (a kick's
+            // tail under a hat, a noise floor), at most 10 dB of each.
+            const auto minusPre = [this] (double e) { return std::max (e - preEnergy, 0.1 * e); };
+            const double distMs = (0.5 * (t0 + n) - 0.5 * (m0 + m1)) * 1000.0 / sr;
+            const float d = powerDb (minusPre (et / (n - t0)) + tiny) - powerDb (minusPre (em / (m1 - m0)) + tiny);
+            f[Feature::EarlyDecayDb] = std::clamp (d * static_cast<float> (10.0 / distMs), -60.0f, 20.0f);
+        }
+    }
+
+    // Sub-onsets: the first block within 30 dB of the loudest one starts the
+    // first burst. A further burst needs a genuine gap: the HP envelope must
+    // have fallen >= 8 dB below the peak of the current burst and then risen
+    // >= 8 dB out of that dip, >= 4 ms after the previous burst. (A slow
+    // attack or the 1 ms fluctuations of band-limited noise are not bursts.)
     constexpr float riseDb = 8.0f;
     const int minGap = std::max (1, static_cast<int> (std::lround (0.004 * sr / blk)));
     int count = 0, last = -minGap;
-    float runMin = -120.0f;
+    float burstPeak = -120.0f, dipMin = -120.0f;
     for (int b = 0; b < numBlocks; ++b)
     {
         const float lv = scratch[static_cast<std::size_t> (2 * b)];
-        if (lv > runMin + riseDb && lv > maxHp - 30.0f && b - last >= minGap)
+        if (count == 0)
+        {
+            if (lv > maxHp - 30.0f)
+            {
+                count = 1;
+                last = b;
+                burstPeak = dipMin = lv;
+            }
+        }
+        else if (burstPeak - dipMin >= riseDb && lv >= dipMin + riseDb && lv > maxHp - 30.0f && b - last >= minGap)
         {
             ++count;
             last = b;
-            runMin = lv;
+            burstPeak = dipMin = lv;
+        }
+        else if (lv > burstPeak && burstPeak - dipMin < riseDb)
+        {
+            burstPeak = dipMin = lv; // still rising within the same burst
         }
         else
         {
-            runMin = std::min (runMin, lv);
+            dipMin = std::min (dipMin, lv);
         }
     }
     f[Feature::SubOnsets] = static_cast<float> (count);

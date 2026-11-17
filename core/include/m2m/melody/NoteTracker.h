@@ -53,8 +53,10 @@ struct NoteTrackerParams
     - Active, legato change: pitch further than changeHysteresis from the note
       centre, snapping to another note, held there for minStableMs ->
       Note Off(old) + Note On(new) at the same time, off first.
-    - Active, retrigger: amplitude onset (if enabled) -> Note Off now, back to
-      Pending; the same note restarts after the stability/attack wait.
+    - Active, retrigger: amplitude onset (if enabled) after the level has
+      dipped >= 3 dB below the note's maximum so far -> Note Off now, back to
+      Pending; the same note restarts after the stability/attack wait. (An
+      onset during the note's own rising attack is not a retrigger.)
     - Active -> Idle: level < off-threshold or confidence lost, continuously for
       releaseMs.
     - Notes are never shorter than minNoteMs (off/change/retrigger wait).
@@ -102,6 +104,8 @@ private:
     std::int64_t minNoteSamples = 0, minStableSamples = 0, releaseSamples = 0, attackSamples = 0;
     std::int64_t onsetLatchSamples = 0;
     std::int64_t latchedOnset = -1;  // onset seen while Active, waiting for a usable frame
+    float activeMaxDb = -120.0f;     // highest level since the note-on
+    float activeDipDb = -120.0f;     // lowest level since that maximum
     float hysteresisSemis = 0.6f;
 
     State st = State::Idle;
