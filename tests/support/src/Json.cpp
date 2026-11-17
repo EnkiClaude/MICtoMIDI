@@ -1,6 +1,7 @@
 #include "m2m/test/Json.h"
 
-#include <charconv>
+#include <locale>
+#include <sstream>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -112,9 +113,26 @@ namespace
             out += "null";
             return;
         }
-        char buf[64];
-        const auto res = std::to_chars (buf, buf + sizeof (buf), v);
-        out.append (buf, res.ptr);
+        // Shortest decimal form that reads back to exactly the same double.
+        // (std::to_chars for floating point is unavailable before macOS 13.3,
+        // and we target macOS 11.) Locale-independent.
+        std::string text;
+        for (int precision = 1; precision <= 17; ++precision)
+        {
+            std::ostringstream os;
+            os.imbue (std::locale::classic());
+            os.precision (precision);
+            os << v;
+            text = os.str();
+
+            std::istringstream is (text);
+            is.imbue (std::locale::classic());
+            double back = 0.0;
+            is >> back;
+            if (back == v)
+                break;
+        }
+        out += text;
     }
 
     void newline (std::string& out, int indent, int depth)
@@ -298,9 +316,14 @@ namespace
                     break;
             }
 
+            // std::from_chars for floating point is unavailable before macOS 26,
+            // so parse with a classic-locale stream and require full consumption.
             double v = 0.0;
-            const auto res = std::from_chars (text.data() + start, text.data() + pos, v);
-            if (res.ec != std::errc() || res.ptr != text.data() + pos)
+            std::istringstream is (std::string (text.substr (start, pos - start)));
+            is.imbue (std::locale::classic());
+            is >> v;
+            const bool consumedAll = ! is.fail() && (is.peek() == std::char_traits<char>::eof());
+            if (pos == start || ! consumedAll)
             {
                 pos = start;
                 err = "invalid number";
