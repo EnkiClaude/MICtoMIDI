@@ -22,8 +22,8 @@ enum class Feature : int
     ZeroCrossingRate, // zero crossings per millisecond
     CrestDb,          // peak / RMS in dB
     AttackMs,         // time from window start to the envelope maximum
-    EarlyDecayDb,     // energy of 2nd half vs 1st half of the window in dB, scaled
-                      // to a 20 ms window (0 = sustained, -10 = fast decay)
+    EarlyDecayDb,     // energy of the last quarter of the window vs the middle
+                      // (35-60 %), dB per 10 ms (0 = sustained, -10 = fast decay)
     SubOnsets,        // number of separate bursts in the window (claps: >= 2)
     LevelDb,          // RMS level of the window, dBFS
     Count
@@ -77,6 +77,7 @@ private:
     int maxN = 1920, fftN = 4096, numBins = 2049;
     int hannLen = -1, preHannLen = -1;
     double preScale = 0.0;
+    double preEnergy = 0.0; // mean power of the pre-onset samples
 
     Fft fft;
     std::vector<float> hann, preHann, frame, mags, preMags, logFreq, scratch;

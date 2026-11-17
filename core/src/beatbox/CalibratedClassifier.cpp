@@ -51,8 +51,8 @@ float CalibratedClassifier::spreadFloor (Feature f) noexcept
         case Feature::RolloffOct:       return 0.3f;
         case Feature::Flatness:         return 0.04f;
         case Feature::ZeroCrossingRate: return 1.5f;
-        case Feature::CrestDb:          return 1.5f;
-        case Feature::AttackMs:         return 3.0f;
+        case Feature::CrestDb:          return 2.5f;
+        case Feature::AttackMs:         return 4.0f;
         case Feature::EarlyDecayDb:     return 2.0f;
         case Feature::SubOnsets:        return 0.5f;
         case Feature::LevelDb:          return 6.0f;
@@ -150,6 +150,40 @@ void CalibratedClassifier::finalize() noexcept
         }
         logSigma[cs] = static_cast<float> (logSum / wSum);
     }
+
+    // Pass 3: per-pair discriminative feature weights.
+    for (int a = 0; a < numDrumClasses; ++a)
+        for (int b = 0; b < numDrumClasses; ++b)
+        {
+            auto& pw = pairWeight[static_cast<std::size_t> (a)][static_cast<std::size_t> (b)];
+            for (int fi = 0; fi < numFeatures; ++fi)
+            {
+                const double sa = 1.0 / invSigma[static_cast<std::size_t> (a)][fi];
+                const double sb = 1.0 / invSigma[static_cast<std::size_t> (b)][fi];
+                const double dm = static_cast<double> (mean[static_cast<std::size_t> (a)][fi])
+                                - mean[static_cast<std::size_t> (b)][fi];
+                const double sep = dm * dm / (0.5 * (sa * sa + sb * sb));
+                pw[fi] = static_cast<float> (featureWeight (static_cast<Feature> (fi)) * sep / (1.0 + sep));
+            }
+        }
+}
+
+float CalibratedClassifier::pairCost (const FeatureVector& f, DrumClass c, DrumClass other) const noexcept
+{
+    const auto cs = idx (c);
+    const auto& pw = pairWeight[cs][idx (other)];
+    double sum = 0.0, wsum = 0.0;
+    for (int fi = 0; fi < numFeatures; ++fi)
+    {
+        const double w = pw[fi];
+        if (! (w > 0.0))
+            continue;
+        const double z = (static_cast<double> (f[fi]) - mean[cs][fi]) * invSigma[cs][fi];
+        const double logS = std::log (spreadFloor (static_cast<Feature> (fi)) * static_cast<double> (invSigma[cs][fi]));
+        sum += w * (z * z - 2.0 * logS);
+        wsum += w;
+    }
+    return wsum > 0.0 && std::isfinite (sum) ? static_cast<float> (sum / wsum) : std::numeric_limits<float>::infinity();
 }
 
 bool CalibratedClassifier::isUsable() const noexcept
@@ -199,7 +233,8 @@ Classification CalibratedClassifier::classify (const FeatureVector& f) const noe
 {
     Classification result;
     float bestD = std::numeric_limits<float>::infinity();
-    float bestCost = bestD;
+    float bestCost = bestD, secondCost = bestD;
+    DrumClass second = DrumClass::Count;
     bool any = false;
 
     for (int c = 0; c < numDrumClasses; ++c)
@@ -214,15 +249,34 @@ Classification CalibratedClassifier::classify (const FeatureVector& f) const noe
         const float cost = d * d + 2.0f * logSigma[static_cast<std::size_t> (c)];
         if (! any || cost < bestCost)
         {
+            if (any)
+            {
+                secondCost = bestCost;
+                second = result.cls;
+            }
             bestCost = cost;
             bestD = d;
             result.cls = cls;
             any = true;
         }
+        else if (cost < secondCost)
+        {
+            secondCost = cost;
+            second = cls;
+        }
     }
 
     if (! any || ! std::isfinite (bestD))
         return {};
+
+    // Re-decide between the two best candidates on the features that
+    // separate them.
+    if (second != DrumClass::Count && std::isfinite (secondCost)
+        && pairCost (f, second, result.cls) < pairCost (f, result.cls, second))
+    {
+        result.cls = second;
+        bestD = distance (f, second);
+    }
 
     // Score from the overall distance, reduced further if any single feature
     // is a gross outlier (a sound that matches "on average" but is clearly

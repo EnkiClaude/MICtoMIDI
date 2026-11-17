@@ -54,6 +54,38 @@ namespace
             sc.notes.push_back ({ t, t, gmNote (kind) });
         }
 
+        /** Mix a drum hit cut off ("choked") after maxSec with a 3 ms fade,
+            as when a beatboxer's next sound ends the previous one. */
+        void addHitChoked (DrumKind kind, double atSec, const DrumParams& p, double maxSec)
+        {
+            auto h = drum (kind, sr(), p);
+            choke (h, maxSec);
+            const auto offset = secondsToSamples (atSec, sr());
+            mixInto (sc.audio, h, offset);
+            const double t = static_cast<double> (offset) / sr();
+            sc.notes.push_back ({ t, t, gmNote (kind) });
+        }
+
+        void choke (std::vector<float>& h, double maxSec) const
+        {
+            const auto n = std::min (h.size(), secondsToSamples (maxSec, sr()));
+            h.resize (n);
+            const auto fade = std::min (n, secondsToSamples (0.003, sr()));
+            for (std::size_t k = 0; k < fade; ++k)
+                h[n - 1 - k] *= static_cast<float> (k) / static_cast<float> (fade);
+        }
+
+        /** Mix a voice-like hit (see voiceDrum) whose truth onset is at atSec. */
+        void addVoiceHit (DrumKind kind, double atSec, const DrumParams& p)
+        {
+            const auto onset = secondsToSamples (atSec, sr());
+            const auto v = voiceDrum (kind, sr(), p);
+            const auto start = onset >= v.onsetSample ? onset - v.onsetSample : 0;
+            mixInto (sc.audio, v.audio, start);
+            const double t = static_cast<double> (start + v.onsetSample) / sr();
+            sc.notes.push_back ({ t, t, gmNote (kind) });
+        }
+
         /** Pad with silence up to an absolute length. */
         void padTo (double seconds)
         {
@@ -318,6 +350,74 @@ namespace
         return tl.finish();
     }
 
+    Scenario voiceSingle (const char* name, DrumKind kind, double sr)
+    {
+        Timeline tl (name, sr);
+        for (int i = 0; i < 12; ++i)
+            tl.addVoiceHit (kind, 0.3 + 0.5 * i, { -6.0 - (i % 4) * 5.0, 1.0, 400u + static_cast<unsigned> (i) });
+        tl.padTo (0.3 + 12 * 0.5 + 0.2);
+        return tl.finish();
+    }
+
+    Scenario voiceBeat (double sr)
+    {
+        Timeline tl ("voice_beat_100bpm", sr);
+        const DrumKind pattern[] = { DrumKind::Kick, DrumKind::ClosedHat, DrumKind::Snare, DrumKind::ClosedHat,
+                                     DrumKind::Kick, DrumKind::Kick,      DrumKind::Snare, DrumKind::ClosedHat };
+        const double eighth = 0.3; // 100 bpm
+        for (int i = 0; i < 24; ++i)
+            tl.addVoiceHit (pattern[i % 8], 0.3 + eighth * i,
+                            { (i % 2 == 0) ? -8.0 : -14.0, 1.0, 500u + static_cast<unsigned> (i) });
+        tl.padTo (0.3 + 24 * eighth + 0.4);
+        return tl.finish();
+    }
+
+    Scenario beatNoiseFloor (double sr)
+    {
+        Timeline tl ("beat_noise_floor", sr);
+        const double levels[] = { -14, -22, -16, -24, -14, -18, -16, -26 };
+        basicPattern (tl, 0.3, 2, [&levels] (int i) { return levels[i % 8]; });
+        tl.padTo (0.3 + 16 * 0.25 + 0.5);
+        // steady pink noise floor at -48 dBFS RMS (room / preamp hiss)
+        const auto noise = pinkNoise (sr, tl.now(), -48.0, 31);
+        mixInto (tl.audio(), noise, 0);
+        return tl.finish();
+    }
+
+    Scenario fast16ths200 (double sr)
+    {
+        // 16ths at 200 bpm = 75 ms apart; each sound is cut off by the next.
+        Timeline tl ("fast_16ths_200bpm", sr);
+        const DrumKind pattern[] = { DrumKind::Kick, DrumKind::ClosedHat, DrumKind::ClosedHat, DrumKind::ClosedHat,
+                                     DrumKind::Snare, DrumKind::ClosedHat, DrumKind::Kick, DrumKind::ClosedHat };
+        const double step = 0.075;
+        for (int i = 0; i < 32; ++i)
+            tl.addHitChoked (pattern[i % 8], 0.25 + step * i,
+                             { (i % 4 == 0) ? -8.0 : -14.0, drumVariation, 600u + static_cast<unsigned> (i) }, step);
+        tl.padTo (0.25 + 32 * step + 0.4);
+        return tl.finish();
+    }
+
+    Scenario flams50ms (double sr)
+    {
+        // Pairs of hits 50 ms apart (grace note + main note); the first sound
+        // is cut off by the second.
+        Timeline tl ("flams_50ms", sr);
+        struct Pair { DrumKind a, b; };
+        const Pair pairs[] = { { DrumKind::Snare, DrumKind::Snare }, { DrumKind::Kick, DrumKind::ClosedHat },
+                               { DrumKind::ClosedHat, DrumKind::Snare }, { DrumKind::Kick, DrumKind::Snare },
+                               { DrumKind::ClosedHat, DrumKind::ClosedHat }, { DrumKind::Snare, DrumKind::Kick },
+                               { DrumKind::Kick, DrumKind::Kick }, { DrumKind::ClosedHat, DrumKind::Kick } };
+        for (int i = 0; i < 8; ++i)
+        {
+            const double t = 0.3 + 0.6 * i;
+            tl.addHitChoked (pairs[i].a, t, { -14.0, drumVariation, 700u + static_cast<unsigned> (i) }, 0.05);
+            tl.addHitChoked (pairs[i].b, t + 0.05, { -8.0, drumVariation, 750u + static_cast<unsigned> (i) }, 0.4);
+        }
+        tl.padTo (0.3 + 8 * 0.6 + 0.3);
+        return tl.finish();
+    }
+
     Scenario beatDynamics (double sr)
     {
         Timeline tl ("beat_dynamics", sr);
@@ -360,6 +460,15 @@ namespace
             { { "basic_beat_120bpm", C::Beatbox, "2 bars of K H S H K K S H 8ths at 120 bpm" }, basicBeat120 },
             { { "fast_hats_16ths", C::Beatbox, "32 closed hats, 16ths at 120 bpm (125 ms apart), accented" }, fastHats16ths },
             { { "beat_dynamics", C::Beatbox, "basic beat with hit levels from -30 to -6 dBFS" }, beatDynamics },
+            { { "beat_noise_floor", C::Beatbox, "basic beat at -26..-14 dBFS over pink noise at -48 dBFS RMS" }, beatNoiseFloor },
+            { { "fast_16ths_200bpm", C::Beatbox, "K H H H S H K H 16ths at 200 bpm (75 ms apart), each sound choked by the next" }, fast16ths200 },
+            { { "flams_50ms", C::Beatbox, "8 pairs of hits 50 ms apart (grace + main), mixed classes" }, flams50ms },
+            { { "voice_kick_only", C::Beatbox, "12 voice-like 'b/p' kicks (plosive + 75-125 Hz body), -6..-21 dBFS" }, [] (double sr) { return voiceSingle ("voice_kick_only", DrumKind::Kick, sr); } },
+            { { "voice_snare_only", C::Beatbox, "12 voice-like 'pf/k' snares (1-6 kHz noise, weak tone)" }, [] (double sr) { return voiceSingle ("voice_snare_only", DrumKind::Snare, sr); } },
+            { { "voice_closed_hat_only", C::Beatbox, "12 voice-like 'ts' closed hats (4-10 kHz fricative)" }, [] (double sr) { return voiceSingle ("voice_closed_hat_only", DrumKind::ClosedHat, sr); } },
+            { { "voice_open_hat_only", C::Beatbox, "12 voice-like 'tsss' open hats" }, [] (double sr) { return voiceSingle ("voice_open_hat_only", DrumKind::OpenHat, sr); } },
+            { { "voice_clap_only", C::Beatbox, "12 voice-like claps (2-4 short 1.5-4 kHz bursts)" }, [] (double sr) { return voiceSingle ("voice_clap_only", DrumKind::Clap, sr); } },
+            { { "voice_beat_100bpm", C::Beatbox, "3 bars of K H S H K K S H 8ths at 100 bpm, voice-like sounds" }, voiceBeat },
         };
         return entries;
     }

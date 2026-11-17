@@ -184,6 +184,198 @@ std::vector<float> openHat (double sr, const DrumParams& p)
     return hat (sr, p, 0.35, 0.065);
 }
 
+//==============================================================================
+// Voice-like family
+
+namespace
+{
+    double clampHz (double hz, double sr) { return std::clamp (hz, 20.0, 0.45 * sr); }
+
+    /** Random value in [lo, hi] drawn around the midpoint, the range scaled by v. */
+    double pick (Rng& r, double lo, double hi, double v)
+    {
+        const double mid = 0.5 * (lo + hi);
+        return mid + v * (r.uniform() - 0.5) * (hi - lo);
+    }
+
+    /** Noise shaped by a filter chain, with envelope env(t). */
+    template <typename Env>
+    void addNoise (std::vector<float>& out, std::size_t start, std::size_t n, double sr, Rng& rng,
+                   std::vector<Biquad> filters, double gain, Env env)
+    {
+        if (out.size() < start + n)
+            out.resize (start + n, 0.0f);
+        // settle the filters on 5 ms of noise first
+        const std::size_t pre = secondsToSamples (0.005, sr);
+        for (std::size_t i = 0; i < pre + n; ++i)
+        {
+            double x = rng.uniformSigned();
+            for (auto& f : filters)
+                x = f.process (x);
+            if (i >= pre)
+            {
+                const double t = static_cast<double> (i - pre) / sr;
+                out[start + i - pre] += static_cast<float> (gain * env (t) * x);
+            }
+        }
+    }
+
+    double attackDecay (double t, double attack, double tau) noexcept
+    {
+        const double a = attack > 0.0 ? std::min (1.0, t / attack) : 1.0;
+        return a * std::exp (-t / tau);
+    }
+
+    double peakOf (const std::vector<float>& b, std::size_t from)
+    {
+        double m = 0.0;
+        for (std::size_t i = from; i < b.size(); ++i)
+            m = std::max (m, std::abs (static_cast<double> (b[i])));
+        return m;
+    }
+}
+
+VoiceDrum voiceDrum (DrumKind kind, double sr, const DrumParams& p)
+{
+    Rng rng (p.seed * 0x9E3779B97F4A7C15ull + 0x5851F42D4C957F2Dull);
+    const double v = std::clamp (p.variation, 0.0, 1.0);
+
+    std::vector<float> hit;
+    switch (kind)
+    {
+        case DrumKind::Kick:
+        {
+            const double f0 = pick (rng, 75.0, 125.0, v);
+            const double drop = pick (rng, 1.0, 1.4, v);           // starts up to 40 % higher
+            const double tau = pick (rng, 0.03, 0.11, v);
+            const double lp = pick (rng, 250.0, 700.0, v);
+            const double burstLen = pick (rng, 0.002, 0.006, v);
+            const double burstGain = std::pow (10.0, pick (rng, -16.0, -4.0, v) / 20.0);
+            const double burstLp = pick (rng, 800.0, 3000.0, v);
+            const double h2 = pick (rng, 0.2, 0.6, v), h3 = pick (rng, 0.05, 0.3, v);
+            const std::size_t n = secondsToSamples (pick (rng, 0.08, 0.2, v), sr);
+
+            hit.assign (n, 0.0f);
+            Biquad lp1 = Biquad::lowPass (sr, clampHz (lp, sr)), lp2 = Biquad::lowPass (sr, clampHz (lp, sr));
+            double phase = 0.0;
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                const double t = static_cast<double> (i) / sr;
+                const double f = f0 * (1.0 + (drop - 1.0) * std::exp (-t / 0.02));
+                phase += f / sr;
+                phase -= std::floor (phase);
+                const double x = std::sin (twoPi * phase) + h2 * std::sin (2 * twoPi * phase)
+                               + h3 * std::sin (3 * twoPi * phase);
+                hit[i] = static_cast<float> (lp2.process (lp1.process (x * attackDecay (t, 0.003, tau))));
+            }
+            const double bodyPeak = peakOf (hit, 0);
+            addNoise (hit, 0, secondsToSamples (burstLen, sr), sr, rng, { Biquad::lowPass (sr, clampHz (burstLp, sr)) },
+                      3.0 * burstGain * bodyPeak, [burstLen] (double t) { return 1.0 - t / burstLen; });
+            break;
+        }
+
+        case DrumKind::Snare:
+        {
+            const double centre = pick (rng, 1200.0, 4500.0, v);
+            const double q = pick (rng, 0.4, 1.2, v);
+            const double tau = pick (rng, 0.02, 0.07, v);
+            const double toneHz = pick (rng, 140.0, 320.0, v);
+            const double toneGain = std::pow (10.0, pick (rng, -22.0, -6.0, v) / 20.0);
+            const double airGain = pick (rng, 0.05, 0.35, v);
+            const double attack = pick (rng, 0.0005, 0.004, v);
+            const std::size_t n = secondsToSamples (pick (rng, 0.08, 0.18, v), sr);
+
+            hit.assign (n, 0.0f);
+            addNoise (hit, 0, n, sr, rng, { Biquad::bandPass (sr, clampHz (centre, sr), q) }, 2.0,
+                      [&] (double t) { return attackDecay (t, attack, tau); });
+            addNoise (hit, 0, n, sr, rng, { Biquad::highPass (sr, clampHz (6000.0, sr)) }, airGain,
+                      [&] (double t) { return attackDecay (t, attack, 0.6 * tau); });
+            const double noisePeak = peakOf (hit, 0);
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                const double t = static_cast<double> (i) / sr;
+                hit[i] += static_cast<float> (noisePeak * toneGain * std::sin (twoPi * toneHz * t)
+                                              * attackDecay (t, 0.002, 0.04));
+            }
+            break;
+        }
+
+        case DrumKind::ClosedHat:
+        case DrumKind::OpenHat:
+        {
+            const bool open = kind == DrumKind::OpenHat;
+            const double tLen = pick (rng, 0.001, 0.004, v);
+            const double hp = pick (rng, 3500.0, 6000.0, v);
+            const double lp = pick (rng, 9000.0, 13000.0, v);
+            const double sLen = open ? pick (rng, 0.15, 0.35, v) : pick (rng, 0.025, 0.08, v);
+            const double sAttack = pick (rng, 0.001, 0.006, v);
+            // closed "ts": the fricative dies away quickly (tau 6-18 ms); open
+            // "tsss": sustained, then released over 80 ms.
+            const double sTau = pick (rng, 0.006, 0.018, v);
+            const double tGain = pick (rng, 0.5, 1.5, v);
+            const std::size_t n = secondsToSamples (tLen + sLen, sr);
+
+            hit.assign (n, 0.0f);
+            // "t": broadband click
+            addNoise (hit, 0, secondsToSamples (tLen, sr), sr, rng, { Biquad::highPass (sr, clampHz (1500.0, sr)) }, tGain,
+                      [tLen] (double t) { return 1.0 - t / tLen; });
+            // "s": fricative, fading out over its length (open: sustained, then fade)
+            addNoise (hit, 0, n, sr, rng,
+                      { Biquad::highPass (sr, clampHz (hp, sr)), Biquad::highPass (sr, clampHz (hp, sr)),
+                        Biquad::lowPass (sr, clampHz (lp, sr)) },
+                      1.0, [&] (double t)
+                      {
+                          const double a = std::min (1.0, t / sAttack);
+                          if (open)
+                              return a * std::clamp ((tLen + sLen - t) / 0.08, 0.0, 1.0);
+                          return a * std::exp (-std::max (0.0, t - sAttack) / sTau);
+                      });
+            break;
+        }
+
+        case DrumKind::Clap:
+        {
+            const int bursts = 2 + static_cast<int> (rng.uniform() * 3.0); // 2..4
+            const double spacing = pick (rng, 0.005, 0.011, v);
+            const double centre = pick (rng, 1500.0, 4000.0, v);
+            const double tailTau = pick (rng, 0.02, 0.05, v);
+            const std::size_t n = secondsToSamples (spacing * bursts + 0.1, sr);
+            hit.assign (n, 0.0f);
+            addNoise (hit, 0, n, sr, rng, { Biquad::bandPass (sr, clampHz (centre, sr), 0.9) }, 1.0, [&] (double t)
+                      {
+                          const int b = std::min (bursts - 1, static_cast<int> (t / spacing));
+                          const double tb = t - b * spacing;
+                          return attackDecay (tb, 0.0005, b == bursts - 1 ? tailTau : 0.002);
+                      });
+            break;
+        }
+    }
+
+    // 3 ms fade-out so the end is not a click.
+    const auto fade = std::min (hit.size(), secondsToSamples (0.003, sr));
+    for (std::size_t k = 0; k < fade; ++k)
+        hit[hit.size() - 1 - k] *= static_cast<float> (k) / static_cast<float> (fade);
+
+    // Quiet breath / lip pre-roll before the hit.
+    VoiceDrum out;
+    const std::size_t preN = secondsToSamples (pick (rng, 0.0, 0.025, v), sr);
+    const double preDb = pick (rng, -45.0, -30.0, v);
+    const double hitPeak = peakOf (hit, 0);
+    out.audio.assign (preN, 0.0f);
+    if (preN > 0)
+        addNoise (out.audio, 0, preN, sr, rng, { Biquad::bandPass (sr, clampHz (2000.0, sr), 0.5) },
+                  hitPeak * std::pow (10.0, preDb / 20.0) * 2.0,
+                  [preN, sr] (double t) { return std::min (1.0, t * sr / static_cast<double> (preN)); });
+    out.onsetSample = preN;
+    out.audio.insert (out.audio.end(), hit.begin(), hit.end());
+
+    const double level = p.levelDb + v * pick (rng, -3.0, 3.0, 1.0);
+    const double pk = peakOf (out.audio, 0);
+    if (pk > 0.0)
+        scale (out.audio, std::pow (10.0, level / 20.0) / pk);
+    return out;
+}
+
 std::vector<float> drum (DrumKind kind, double sr, const DrumParams& p)
 {
     switch (kind)

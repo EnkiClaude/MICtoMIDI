@@ -143,7 +143,7 @@ private:
     enum class CmdType : int { Begin, End, Cancel, Clear, ClearAll };
     struct Command { CmdType type; int cls; };
 
-    struct PendingOnset { std::int64_t onset; float strength; };
+    struct PendingOnset { std::int64_t onset; float strength; bool reanchored; };
     struct PendingOff { std::int64_t time; std::uint8_t note, channel; };
 
     // states of the two lock-free mailboxes
@@ -159,6 +159,8 @@ private:
     void handleHop (std::int64_t hopEnd, std::int64_t blockStart, MidiEventBuffer& out) noexcept;
     void classifyOnset (const PendingOnset& p, std::int64_t emitSample, std::int64_t blockStart,
                         MidiEventBuffer& out) noexcept;
+    bool reanchor (PendingOnset& p) const noexcept;
+    bool isDuplicateOfAnchor (std::int64_t onset) const noexcept;
     void emitNoteOffsUpTo (std::int64_t t, std::int64_t blockStart, MidiEventBuffer& out) noexcept;
     void pushHit (const HitInfo& h) noexcept;
 
@@ -184,6 +186,7 @@ private:
 
     std::array<PendingOnset, 16> pending {};
     int numPending = 0;
+    std::int64_t lastAnchor = -1;   // last re-anchored onset (dedupe of the detector's own report)
     std::array<PendingOff, 32> offs {};
     int numOffs = 0;
 

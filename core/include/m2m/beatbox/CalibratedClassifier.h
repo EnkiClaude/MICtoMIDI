@@ -21,7 +21,11 @@ namespace m2m
     sensitivity). With the default minScore 0.35 that rejects d > ~3.6 (a
     sound unlike every class).
     The winning class is chosen by diagonal-Gaussian log-likelihood
-    (d^2 + 2 * mean log sigma) so wide classes do not absorb outliers.
+    (d^2 + 2 * mean log sigma) so wide classes do not absorb outliers. The
+    two best candidates are then compared again with per-pair feature
+    weights that favour the features separating THOSE two classes (e.g. the
+    decay for closed vs. open hat), so features irrelevant to that decision
+    cannot outvote the relevant one by chance.
     The level feature has weight 0 (loudness must not decide the class).
 
     Classes without examples are never returned. No heap memory: the
@@ -74,11 +78,16 @@ public:
     static float spreadFloor (Feature f) noexcept;
 
 private:
+    float pairCost (const FeatureVector& f, DrumClass c, DrumClass other) const noexcept;
+
     ClassifierParams params;
     std::array<std::array<FeatureVector, maxExamplesPerClass>, numDrumClasses> examples {};
     std::array<int, numDrumClasses> counts {};
     std::array<FeatureVector, numDrumClasses> mean {}, invSigma {};
     std::array<float, numDrumClasses> logSigma {}; // weighted mean log (sigma / floor)
+    // Per class pair, per feature: how well the feature separates the two
+    // classes (s / (1 + s), s = squared mean difference over mean variance).
+    std::array<std::array<FeatureVector, numDrumClasses>, numDrumClasses> pairWeight {};
 };
 
 } // namespace m2m

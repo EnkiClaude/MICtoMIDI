@@ -20,12 +20,14 @@ TEST_CASE ("support/Scenarios: catalogue")
         "sustained_notes", "chromatic_scale", "major_scale_legato", "vibrato", "glide", "repeated_same_pitch",
         "weak_fundamental", "dynamics", "noisy_20db_snr", "silence", "noise_only",
         "kick_only", "snare_only", "closed_hat_only", "open_hat_only", "clap_only",
-        "basic_beat_120bpm", "fast_hats_16ths", "beat_dynamics",
+        "basic_beat_120bpm", "fast_hats_16ths", "beat_dynamics", "beat_noise_floor", "fast_16ths_200bpm",
+        "flams_50ms", "voice_kick_only", "voice_snare_only", "voice_closed_hat_only", "voice_open_hat_only",
+        "voice_clap_only", "voice_beat_100bpm",
     };
     REQUIRE (scenarioNames() == expected);
     REQUIRE (scenarioNames (ScenarioCategory::Trigger).size() == 1);
     REQUIRE (scenarioNames (ScenarioCategory::Melody).size() == 11);
-    REQUIRE (scenarioNames (ScenarioCategory::Beatbox).size() == 8);
+    REQUIRE (scenarioNames (ScenarioCategory::Beatbox).size() == 17);
     REQUIRE (scenarioCatalogue().size() == expected.size());
     REQUIRE (hasScenario ("glide"));
     REQUIRE_FALSE (hasScenario ("nope"));
