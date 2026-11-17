@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'claude/**']
   pull_request:
+  workflow_dispatch:   # "Run workflow" button in the Actions tab
 
 jobs:
   core:
@@ -81,7 +82,7 @@ jobs:
 
   plugin-macos:
     name: Plugin build + pluginval (macOS arm64)
-    runs-on: macos-14
+    runs-on: macos-latest   # Apple Silicon (arm64)
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
