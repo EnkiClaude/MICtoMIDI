@@ -10,6 +10,10 @@ namespace m2m
 namespace
 {
     constexpr double dcCutoffHz = 10.0;
+    constexpr double maxInput = 64.0;    // +36 dBFS
+    constexpr double tinyState = 1.0e-30;
+
+    double flushTiny (double v) noexcept { return std::abs (v) < tinyState ? 0.0 : v; }
 }
 
 void Preprocessor::prepare (double sampleRate)
@@ -56,7 +60,8 @@ void Preprocessor::process (const float* in, float* out, int numSamples) noexcep
 {
     for (int i = 0; i < numSamples; ++i)
     {
-        const double x = in[i];
+        const double raw = in[i];
+        const double x = std::isfinite (raw) ? std::clamp (raw, -maxInput, maxInput) : 0.0;
 
         const double dc = x - dcX1 + dcR * dcY1;
         dcX1 = x;
@@ -72,6 +77,10 @@ void Preprocessor::process (const float* in, float* out, int numSamples) noexcep
 
         out[i] = static_cast<float> (y);
     }
+
+    dcY1 = flushTiny (dcY1);
+    s1 = flushTiny (s1);
+    s2 = flushTiny (s2);
 }
 
 } // namespace m2m

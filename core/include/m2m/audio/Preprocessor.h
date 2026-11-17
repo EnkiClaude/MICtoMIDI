@@ -5,6 +5,9 @@ namespace m2m
 
 /** Input conditioning: DC blocker followed by a 2nd-order Butterworth
     high-pass (default 60 Hz) to remove rumble and handling noise.
+    Non-finite input samples (NaN, Inf) are replaced by 0 and the input is
+    limited to +-64 (+36 dBFS), so a corrupt host buffer cannot poison the
+    filter state; tiny state values are flushed to 0 (no denormals).
     Real-time safe; process() works in place (in may equal out). */
 class Preprocessor
 {

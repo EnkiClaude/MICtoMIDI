@@ -57,6 +57,13 @@ struct HitInfo
     classifier -> DrumMapping -> NoteOn (velocity = peak in the first
     velocityWindowMs) and a NoteOff gateMs later.
 
+    Held notes: only a NoteOn that fitted into the MidiEventBuffer counts as
+    sounding; a NoteOff that does not fit stays queued and is retried at the
+    next process()/flush() (a retrigger of that note waits for it). reset()
+    and prepare() emit nothing but keep the queued NoteOffs and send them at
+    the start of the next process() (or in flush()). So every delivered
+    NoteOn gets a NoteOff, even with a tiny buffer.
+
     Timing: analysis runs on an internal fixed hop (64 samples @ 48 kHz), so
     the output is identical for any host block size. The NoteOn is placed on
     the last sample of the first hop at which the analysis window is complete,

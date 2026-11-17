@@ -67,7 +67,14 @@ struct MelodyParams
 
     Events are stamped at the sample that completed their analysis hop, so
     output is identical for any host block size. process()/setParams() never
-    allocate, lock or do I/O. */
+    allocate, lock or do I/O.
+
+    Held notes are tracked by what was actually delivered: a NoteOn that does
+    not fit into the MidiEventBuffer is not considered sounding, and a NoteOff
+    that does not fit is retried at the start of the next process() or
+    flush() (no new note starts before it is out). reset() and prepare()
+    do not emit, but a note sounding at that moment is released at the start
+    of the next process()/flush(). So every delivered NoteOn gets a NoteOff. */
 class MelodyEngine final : public IEngine
 {
 public:
@@ -107,6 +114,8 @@ private:
     void applyParams() noexcept;
     void analyseFrame (int offsetInBlock, MidiEventBuffer& out) noexcept;
     void emit (const TrackerEvent& e, int offset, MidiEventBuffer& out) noexcept;
+    void sendNoteOff (int offset, MidiEventBuffer& out) noexcept;
+    bool retryPendingOff (int offset, MidiEventBuffer& out) noexcept;
     IPitchDetector& detector() noexcept;
 
     MelodyParams params;
@@ -135,6 +144,10 @@ private:
 
     int sentNote = -1;
     int sentChannel = 1;
+    // A NoteOff that did not fit into the output buffer (or a note still
+    // sounding at reset()): sent first thing in the next process()/flush().
+    int pendingOffNote = -1;
+    int pendingOffChannel = 1;
     int lastVel = 0;
 
     float telemetryHz = 0.0f, telemetryMidi = 0.0f, telemetryConfidence = 0.0f;
