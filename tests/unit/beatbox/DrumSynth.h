@@ -222,6 +222,12 @@ inline std::vector<float> renderDrum (SynthDrum type, double sr, Rng& rng, float
         }
     }
 
+    // 5 ms fade-out so the end of a sound is not a click (a hard cut of a
+    // ringing kick is a genuine broadband transient).
+    const auto fade = std::min (s.size(), static_cast<std::size_t> (0.005 * sr));
+    for (std::size_t k = 0; k < fade; ++k)
+        s[s.size() - 1 - k] *= static_cast<float> (k) / static_cast<float> (fade);
+
     normalisePeak (s, peakDb);
     return s;
 }

@@ -103,6 +103,7 @@ private:
     std::int64_t pos = 0;           // samples consumed
     std::int64_t lastOnset = -1;    // last reported onset sample
     bool haveLast = false;
+    float postMask = 0.0f, postMaskDecay = 0.95f;
     int framesSeen = 0;
     float lastD = 0.0f, lastThr = 0.0f;
 };

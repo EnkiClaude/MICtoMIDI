@@ -17,6 +17,8 @@ namespace
     constexpr float riseScaleDb    = 20.0f;   // d += rise / riseScaleDb
     constexpr double medianWindowS = 0.1;
     constexpr double riseWindowS   = 0.02;
+    constexpr double postMaskTauS  = 0.025;
+    constexpr float postMaskGain   = 0.5f;
     constexpr float lowBandHz      = 500.0f;
     constexpr float midBandHz      = 4000.0f;
 
@@ -79,6 +81,7 @@ void OnsetDetector::reset() noexcept
     pos = 0;
     lastOnset = -1;
     haveLast = false;
+    postMask = 0.0f;
     framesSeen = 0;
     lastD = lastThr = 0.0f;
 }
@@ -91,6 +94,7 @@ void OnsetDetector::setParams (const OnsetParams& p) noexcept
     margin = 0.05f + 0.5f * (1.0f - s);
     const float refMs = std::isfinite (p.refractoryMs) ? std::clamp (p.refractoryMs, 0.0f, 1000.0f) : 40.0f;
     refractory = static_cast<std::int64_t> (std::lround (refMs * 0.001 * sr));
+    postMaskDecay = static_cast<float> (std::exp (-hop / (postMaskTauS * sr)));
     minPeak = dbToGain (std::isfinite (p.minLevelDb) ? p.minLevelDb : -45.0f);
 }
 
@@ -166,13 +170,19 @@ bool OnsetDetector::analyseHop (OnsetEvent& ev) noexcept
     const int lowEnd = std::clamp (static_cast<int> (lowBandHz / binHz) + 1, 1, numBins);
     const int midEnd = std::clamp (static_cast<int> (midBandHz / binHz) + 1, lowEnd + 1, numBins);
 
+    for (int k = 0; k < numBins; ++k)
+        curLog[static_cast<std::size_t> (k)] = std::log1p (logGamma * magScale * mags[static_cast<std::size_t> (k)]);
+
+    // SuperFlux-style: compare against the max of the 3 neighbouring bins of
+    // the previous frame, so gliding partials (kick pitch drop) are no onset.
     float fluxLow = 0.0f, fluxMid = 0.0f, fluxHigh = 0.0f;
     for (int k = 0; k < numBins; ++k)
     {
         const auto ks = static_cast<std::size_t> (k);
-        const float l = std::log1p (logGamma * magScale * mags[ks]);
-        const float diff = std::max (0.0f, l - prevLog[ks]);
-        curLog[ks] = l;
+        float ref = prevLog[ks];
+        if (k > 0)            ref = std::max (ref, prevLog[ks - 1]);
+        if (k + 1 < numBins)  ref = std::max (ref, prevLog[ks + 1]);
+        const float diff = std::max (0.0f, curLog[ks] - ref);
 
         if (k < lowEnd)       fluxLow += diff;
         else if (k < midEnd)  fluxMid += diff;
@@ -183,7 +193,10 @@ bool OnsetDetector::analyseHop (OnsetEvent& ev) noexcept
     fluxLow  /= static_cast<float> (lowEnd);
     fluxMid  /= static_cast<float> (midEnd - lowEnd);
     fluxHigh /= static_cast<float> (std::max (1, numBins - midEnd));
-    const float flux = (fluxLow + fluxMid + fluxHigh) / 3.0f;
+    // Mean of the bands plus the strongest band: a hit confined to one band
+    // (kick, hat) is not diluted by the quiet bands.
+    const float flux = 0.5f * (fluxLow + fluxMid + fluxHigh) / 3.0f
+                     + 0.5f * std::max ({ fluxLow, fluxMid, fluxHigh });
 
     // Broadband rise of the hop energy against the previous two hops.
     const float e = powerToDb (hopEnergy / static_cast<float> (hop));
@@ -197,7 +210,10 @@ bool OnsetDetector::analyseHop (OnsetEvent& ev) noexcept
     const float d = flux + rise / riseScaleDb;
 
     // Threshold for the newest frame from the history *before* it.
-    const float thr = median() + margin;
+    // Plus a decaying mask after each onset: noisy tails (clap, open hat)
+    // produce flux fluctuations right after the hit.
+    const float thr = median() + margin + postMask;
+    postMask *= postMaskDecay;
 
     dHist[static_cast<std::size_t> (dWrite)] = d;
     dWrite = (dWrite + 1) % static_cast<int> (dHist.size());
@@ -229,6 +245,7 @@ bool OnsetDetector::analyseHop (OnsetEvent& ev) noexcept
                 ev.samplePosition = est;
                 ev.strength = dPrev1;
                 lastOnset = est;
+                postMask = postMaskGain * dPrev1;
                 haveLast = true;
                 found = true;
             }
