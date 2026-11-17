@@ -4,7 +4,7 @@
 #include "EngineFactory.h"
 
 #include "m2m/trigger/LevelTriggerEngine.h"
-// #include "m2m/melody/MelodyEngine.h"     // TODO (integration): enable
+#include "m2m/melody/MelodyEngine.h"
 // #include "m2m/beatbox/BeatboxEngine.h"   // TODO (integration): enable
 
 namespace m2m::cli
@@ -29,7 +29,7 @@ std::unique_ptr<m2m::IEngine> makeEngine (const std::string& mode)
         return std::make_unique<m2m::LevelTriggerEngine>(); // default params: note 60, -30 dBFS
 
     if (mode == "melody")
-        return nullptr; // TODO (integration): return std::make_unique<m2m::MelodyEngine>();
+        return std::make_unique<m2m::MelodyEngine>();
 
     if (mode == "beatbox")
         return nullptr; // TODO (integration): return std::make_unique<m2m::BeatboxEngine>();

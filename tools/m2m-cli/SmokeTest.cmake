@@ -26,7 +26,8 @@ run_cli(0 eval --mode trigger --scenarios level_bursts --baseline ${OUT}/baselin
 run_cli(1 run --mode trigger ${OUT}/does_not_exist.wav)
 run_cli(2 eval --mode nonsense)
 run_cli(2 eval --mode trigger --scenarios no_such_scenario)
-run_cli(3 eval --mode melody)
+# Exit 3 (engine not available) can no longer be exercised: every mode has an engine.
+run_cli(0 eval --mode melody --scenarios sustained_notes)
 
 file(READ ${OUT}/baseline.json baseline)
 string(REGEX REPLACE "\"minF1\": [0-9.e+-]+" "\"minF1\": 1.5" baseline "${baseline}")
