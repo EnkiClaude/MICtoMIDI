@@ -28,7 +28,12 @@ target_sources(MICtoMIDI PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/Parameters.cpp
-    Source/VirtualMidiOut.cpp)
+    Source/VirtualMidiOut.cpp
+    Source/ui/Theme.cpp
+    Source/ui/Controls.cpp
+    Source/ui/HeaderBar.cpp
+    Source/ui/MelodyPage.cpp
+    Source/ui/BeatboxPage.cpp)
 
 target_compile_definitions(MICtoMIDI PUBLIC
     JUCE_WEB_BROWSER=0

@@ -1,21 +1,28 @@
-// Loads the built VST3 through JUCE's VST3 hosting layer and checks that a
-// tone on the main input, and separately on the sidechain input, produces a
-// note-on/note-off pair, and that state save/restore round-trips.
+// Loads the built VST3 through JUCE's VST3 hosting layer and checks, end to
+// end through the real plugin binary:
+//   - it is an instrument with MIDI out and two input buses (main + sidechain)
+//   - Melody mode: 220 Hz -> A3 (57) on/off, 330 Hz -> E4 (64), main and sidechain
+//   - Beatbox mode: kick-like burst -> 36, hat-like burst -> 42, channel 10
+//   - switching mode while a note is held sends its note-off
+//   - reported latency is > 0 and follows the mode
+//   - state save/restore round-trips the mode and a few parameters
+// All signals are synthetic and deterministic.
 //
 // Usage: m2m_plugin_smoke_test <path/to/MICtoMIDI.vst3>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 
+#include "Signals.h"
+
 #include <cmath>
 #include <iostream>
+#include <map>
 
 namespace
 {
 constexpr double sampleRate = 48000.0;
 constexpr int blockSize = 256;
-
-struct Counts { int ons = 0, offs = 0; };
 
 int failures = 0;
 
@@ -26,49 +33,123 @@ void check (bool ok, const juce::String& what)
         ++failures;
 }
 
-/** Feed 0.3 s silence, 0.4 s tone, 0.6 s silence into the given input bus. */
-Counts runTone (juce::AudioPluginInstance& plugin, int toneBus)
+struct Note
 {
-    plugin.prepareToPlay (sampleRate, blockSize);
+    bool on;
+    int note, channel;
+    juce::int64 pos;
+};
 
-    const int totalChannels = juce::jmax (plugin.getTotalNumInputChannels(),
-                                          plugin.getTotalNumOutputChannels());
-    juce::AudioBuffer<float> buffer (totalChannels, blockSize);
+struct Host
+{
+    juce::AudioPluginInstance& plugin;
+    std::map<juce::String, juce::AudioProcessorParameter*> params;
+    juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
-    Counts c;
+    juce::int64 pos = 0;
 
-    const auto toneStart = (juce::int64) (0.3 * sampleRate);
-    const auto toneEnd   = (juce::int64) (0.7 * sampleRate);
-    const auto total     = (juce::int64) (1.3 * sampleRate);
-
-    for (juce::int64 pos = 0; pos < total; pos += blockSize)
+    explicit Host (juce::AudioPluginInstance& p) : plugin (p)
     {
-        buffer.clear();
-        auto bus = plugin.getBusBuffer (buffer, true, toneBus);
-        for (int i = 0; i < blockSize; ++i)
-        {
-            const auto n = pos + i;
-            if (n >= toneStart && n < toneEnd)
-            {
-                const float v = 0.25f * (float) std::sin (2.0 * juce::MathConstants<double>::pi
-                                                          * 220.0 * (double) n / sampleRate);
-                for (int ch = 0; ch < bus.getNumChannels(); ++ch)
-                    bus.setSample (ch, i, v);
-            }
-        }
-
-        midi.clear();
-        plugin.processBlock (buffer, midi);
-        for (const auto meta : midi)
-        {
-            const auto m = meta.getMessage();
-            if (m.isNoteOn())  ++c.ons;
-            if (m.isNoteOff()) ++c.offs;
-        }
+        for (auto* param : plugin.getParameters())
+            params[param->getName (128)] = param;
     }
 
-    plugin.releaseResources();
-    return c;
+    juce::AudioProcessorParameter* param (const juce::String& name)
+    {
+        auto it = params.find (name);
+        return it == params.end() ? nullptr : it->second;
+    }
+
+    /** Sets a parameter from its real value (only for simple linear ranges
+        used here: choice/int/float with known bounds). */
+    void set (const juce::String& name, float normalised)
+    {
+        if (auto* p = param (name))
+            p->setValueNotifyingHost (normalised);
+        else
+            check (false, "parameter \"" + name + "\" exists");
+    }
+
+    void prepare()
+    {
+        plugin.prepareToPlay (sampleRate, blockSize);
+        buffer.setSize (juce::jmax (plugin.getTotalNumInputChannels(), plugin.getTotalNumOutputChannels()), blockSize);
+        pos = 0;
+    }
+
+    /** Process `signal` on input bus `bus`; returns the MIDI notes. A callback
+        may run before each block (e.g. to change a parameter mid-stream). */
+    std::vector<Note> run (const std::vector<float>& signal, int bus,
+                           const std::function<void (juce::int64 offset, const std::vector<Note>&)>& beforeBlock = {})
+    {
+        std::vector<Note> notes;
+        for (size_t start = 0; start < signal.size(); start += blockSize)
+        {
+            if (beforeBlock)
+                beforeBlock ((juce::int64) start, notes);
+
+            buffer.clear();
+            auto in = plugin.getBusBuffer (buffer, true, bus);
+            for (int i = 0; i < blockSize && start + (size_t) i < signal.size(); ++i)
+                for (int ch = 0; ch < in.getNumChannels(); ++ch)
+                    in.setSample (ch, i, signal[start + (size_t) i]);
+
+            midi.clear();
+            plugin.processBlock (buffer, midi);
+            for (const auto meta : midi)
+            {
+                const auto m = meta.getMessage();
+                if (m.isNoteOn())
+                    notes.push_back ({ true, m.getNoteNumber(), m.getChannel(), pos + meta.samplePosition });
+                else if (m.isNoteOff())
+                    notes.push_back ({ false, m.getNoteNumber(), m.getChannel(), pos + meta.samplePosition });
+            }
+            pos += blockSize;
+        }
+        return notes;
+    }
+
+    void silence (double seconds, int bus = 1)
+    {
+        std::vector<float> s;
+        m2m::smoke::silence (s, sampleRate, seconds);
+        run (s, bus);
+    }
+};
+
+juce::String describe (const std::vector<Note>& notes)
+{
+    juce::String s;
+    for (const auto& n : notes)
+        s << (n.on ? "on " : "off ") << n.note << "/ch" << n.channel << "  ";
+    return s.isEmpty() ? juce::String ("no notes") : s.trim();
+}
+
+/** True if the notes are exactly: on(n0) off(n0) on(n1) off(n1) ... on `channel`. */
+bool isSequence (const std::vector<Note>& notes, std::initializer_list<int> expected, int channel)
+{
+    if (notes.size() != expected.size() * 2)
+        return false;
+    size_t i = 0;
+    for (int n : expected)
+    {
+        const auto& on = notes[i++];
+        const auto& off = notes[i++];
+        if (! on.on || off.on || on.note != n || off.note != n || on.channel != channel || off.channel != channel
+            || off.pos < on.pos)
+            return false;
+    }
+    return true;
+}
+
+/** Pumps the message loop (the plugin reports latency from a timer) until
+    the hosted latency differs from `old`, or the timeout. */
+int waitForLatencyChange (juce::AudioPluginInstance& plugin, int old, int timeoutMs = 3000)
+{
+    const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMs;
+    while (plugin.getLatencySamples() == old && juce::Time::getMillisecondCounter() < end)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+    return plugin.getLatencySamples();
 }
 } // namespace
 
@@ -115,35 +196,128 @@ int main (int argc, char** argv)
         in = juce::AudioChannelSet::stereo();
     check (plugin->setBusesLayout (layout), "both input buses can be enabled");
 
+    Host host (*plugin);
+    for (auto* name : { "Mode", "Melody Min Freq", "Beatbox Kick Note", "Beatbox MIDI Channel", "Melody MIDI Channel" })
+        check (host.param (name) != nullptr, juce::String ("parameter \"") + name + "\" exposed to host");
+    if (failures > 0)
+        return 1;
+
+    using namespace m2m::smoke;
+    const auto mainBus = 0, sidechain = 1;
+
+    // ---- Melody mode -----------------------------------------------------------
+    host.set ("Mode", 0.0f);
+    host.prepare();
+    host.silence (0.1);
+    const int melodyLatency = plugin->getLatencySamples();
+    check (melodyLatency > 0, "Melody mode reports latency > 0 (" + juce::String (melodyLatency) + " samples)");
+
     {
-        const auto c = runTone (*plugin, 0);
-        check (c.ons == 1 && c.offs == 1,
-               "tone on main input -> 1 note on / 1 note off (got " + juce::String (c.ons) + "/" + juce::String (c.offs) + ")");
+        std::vector<float> s;
+        silence (s, sampleRate, 0.3);
+        harmonicTone (s, sampleRate, 220.0, 0.4);
+        silence (s, sampleRate, 0.5);
+        const auto n = host.run (s, mainBus);
+        check (isSequence (n, { 57 }, 1), "220 Hz on main input -> A3 (57) on/off, ch 1 (got " + describe (n) + ")");
     }
     {
-        const auto c = runTone (*plugin, 1);
-        check (c.ons == 1 && c.offs == 1,
-               "tone on sidechain -> 1 note on / 1 note off (got " + juce::String (c.ons) + "/" + juce::String (c.offs) + ")");
+        std::vector<float> s;
+        silence (s, sampleRate, 0.3);
+        harmonicTone (s, sampleRate, 220.0, 0.4);
+        silence (s, sampleRate, 0.4);
+        harmonicTone (s, sampleRate, 330.0, 0.4);
+        silence (s, sampleRate, 0.5);
+        const auto n = host.run (s, sidechain);
+        check (isSequence (n, { 57, 64 }, 1), "220 Hz then 330 Hz on sidechain -> 57 then 64 (got " + describe (n) + ")");
     }
 
-    // State round-trip: change the note parameter, save, reset, restore.
-    juce::AudioProcessorParameter* noteParam = nullptr;
-    for (auto* p : plugin->getParameters())
-        if (p->getName (64) == "Note")
-            noteParam = p;
-    check (noteParam != nullptr, "Note parameter exposed to host");
-
-    if (noteParam != nullptr)
+    // ---- Mode switch while a note is held ----------------------------------------
     {
-        noteParam->setValueNotifyingHost (36.0f / 127.0f);
-        const float saved = noteParam->getValue();
+        std::vector<float> s;
+        silence (s, sampleRate, 0.2);
+        harmonicTone (s, sampleRate, 220.0, 1.0);
+        silence (s, sampleRate, 0.3);
+        bool switched = false;
+        juce::int64 switchPos = -1;
+        const auto n = host.run (s, sidechain, [&] (juce::int64 offset, const std::vector<Note>& sofar)
+        {
+            if (! switched && ! sofar.empty() && sofar.back().on && offset > (juce::int64) (0.5 * sampleRate))
+            {
+                host.set ("Mode", 1.0f); // Beatbox
+                switched = true;
+                switchPos = host.pos;
+            }
+        });
+        const bool heldThenReleased = n.size() == 2 && n[0].on && n[0].note == 57 && ! n[1].on && n[1].note == 57
+                                      && switched && n[1].pos >= switchPos && n[1].pos < switchPos + 2 * blockSize;
+        check (heldThenReleased, "switching to Beatbox while A3 is held sends its note-off at the switch (got "
+                                     + describe (n) + ")");
+    }
+
+    // ---- Latency follows the mode -------------------------------------------------
+    {
+        const int beatboxLatency = waitForLatencyChange (*plugin, melodyLatency);
+        check (beatboxLatency > 0 && beatboxLatency != melodyLatency,
+               "latency changes with the mode (melody " + juce::String (melodyLatency) + ", beatbox "
+                   + juce::String (beatboxLatency) + " samples)");
+    }
+
+    // ---- Beatbox mode ---------------------------------------------------------------
+    {
+        host.prepare(); // mode is Beatbox now
+        host.silence (0.2);
+        std::vector<float> s;
+        silence (s, sampleRate, 0.3);
+        kick (s, sampleRate, 0.5f);
+        silence (s, sampleRate, 0.4);
+        hat (s, sampleRate);
+        silence (s, sampleRate, 0.5);
+        const auto n = host.run (s, sidechain);
+        check (isSequence (n, { 36, 42 }, 10), "kick-like then hat-like burst -> 36 then 42 on ch 10 (got " + describe (n) + ")");
+        check (plugin->getLatencySamples() > 0, "Beatbox mode reports latency > 0 after prepare");
+    }
+
+    // ---- State save / restore ---------------------------------------------------------
+    {
+        auto* mode = host.param ("Mode");
+        auto* minHz = host.param ("Melody Min Freq");
+        auto* kickNote = host.param ("Beatbox Kick Note");
+        auto* channel = host.param ("Melody MIDI Channel");
+
+        mode->setValueNotifyingHost (1.0f);
+        minHz->setValueNotifyingHost (0.3f);
+        kickNote->setValueNotifyingHost (40.0f / 127.0f);
+        channel->setValueNotifyingHost (4.0f / 15.0f);
+        host.silence (0.05);
+        // Compare as text: the plugin snaps values to its parameter steps.
+        const auto snapshot = [&]
+        {
+            juce::StringArray s;
+            for (auto* p : { mode, minHz, kickNote, channel })
+                s.add (p->getCurrentValueAsText());
+            return s.joinIntoString (", ");
+        };
+        const auto saved = snapshot();
+
         juce::MemoryBlock state;
         plugin->getStateInformation (state);
-        noteParam->setValueNotifyingHost (0.9f);
+
+        mode->setValueNotifyingHost (0.0f);
+        minHz->setValueNotifyingHost (0.9f);
+        kickNote->setValueNotifyingHost (0.0f);
+        channel->setValueNotifyingHost (0.0f);
+        host.silence (0.05);
+
         plugin->setStateInformation (state.getData(), (int) state.getSize());
-        check (std::abs (noteParam->getValue() - saved) < 1.0e-4f, "state save/restore round-trips the Note parameter");
+        host.silence (0.05);
+
+        const auto restored = snapshot();
+        check (restored == saved && saved.startsWith ("Beatbox"),
+               "state save/restore round-trips Mode, Melody Min Freq, Beatbox Kick Note, Melody MIDI Channel ("
+                   + saved + " -> " + restored + ")");
     }
 
+    plugin->releaseResources();
     plugin.reset();
     std::cout << (failures == 0 ? "ALL PASSED\n" : "FAILURES: " + std::to_string (failures) + "\n");
     return failures == 0 ? 0 : 1;

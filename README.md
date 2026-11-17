@@ -8,18 +8,45 @@ See [PLAN.md](PLAN.md) for the full design and roadmap.
 
 ## Status
 
-**Phase 1: plugin shell and routing test.** The plugin plays one fixed note
-whenever the input level goes above a threshold. This proves that audio in →
-MIDI out works in Ableton Live, through both the plugin and the standalone app,
-before any pitch detection is built.
-Manual test checklist: [docs/phase1-ableton-test.md](docs/phase1-ableton-test.md).
+**Phase 7: both modes are wired into the plugin with a full UI.**
+
+- **Melody mode:** sing, hum or whistle → MIDI notes (YIN/MPM pitch detection,
+  note tracking with vibrato hysteresis, retrigger, scale snap, transpose,
+  level-based velocity). The window shows the detected note, Hz, cents,
+  confidence and a scrolling pitch trace with the sent notes.
+- **Beatbox mode:** vocal percussion → General MIDI drums on channel 10
+  (kick, snare, clap, closed hat, open hat). Rule-based classifier out of the box,
+  or calibrate it to your own sounds (a few examples per sound; saved with your
+  project, exportable to a file).
+- Latency is reported to the host and shown in the window (about 25–30 ms in
+  Melody mode and 20–25 ms in Beatbox mode with the default settings).
+
+Not yet verified on a real Mac in Ableton Live: see the manual checklist
+[docs/phase1-ableton-test.md](docs/phase1-ableton-test.md).
+
+## Using it
+
+Set-up guide for Ableton Live (plugin or standalone app, calibration, latency):
+**[docs/ableton-setup.md](docs/ableton-setup.md)**.
+
+In short: MICtoMIDI is an **instrument** that takes the mic through its
+**sidechain** (or main) input, because Live only forwards MIDI from
+instruments. A second MIDI track picks up its notes with *MIDI From →
+MICtoMIDI*. The standalone app instead creates a virtual MIDI port named
+**MICtoMIDI** (macOS/Linux) that any DAW can use. Use headphones: speaker
+sound leaking into the mic produces stray notes.
+
+All settings are host-automatable parameters with stable IDs (`mode`,
+`input_gain`, `vel_*`, `mel_*`, `bb_*`); see `plugin/Source/Parameters.h`.
 
 ## Layout
 
 ```
 core/                 JUCE-free DSP + MIDI library (all analysis logic lives here)
 plugin/               JUCE plugin: VST3, AU (macOS) and Standalone
-tools/plugin-smoke-test/  loads the built VST3 in a host and checks MIDI comes out
+tools/plugin-smoke-test/  loads the built VST3 in a host and checks melody/beatbox MIDI,
+                      mode switching, latency and state; also m2m_ui_snapshot
+                      (renders the editor to PNG with synthetic input)
 tests/                Catch2 unit tests for core/
 ```
 
@@ -47,10 +74,13 @@ Linux needs the JUCE system packages:
 
 Build outputs: `build/plugin/MICtoMIDI_artefacts/Release/{VST3,AU,Standalone}/`.
 
-## Using it in Ableton Live
+## Checking a build
 
-Live only forwards MIDI from plugins that load as instruments, so MICtoMIDI is an
-**instrument** that takes the mic through its **sidechain** (or main) input.
-Step-by-step setup: [docs/phase1-ableton-test.md](docs/phase1-ableton-test.md).
-The standalone app instead creates a virtual MIDI port named **MICtoMIDI**
-(macOS/Linux) that any DAW can use as a MIDI input.
+```sh
+# Hosts the VST3 and checks Melody/Beatbox output end to end (Linux: run under xvfb-run -a)
+build/tools/plugin-smoke-test/m2m_plugin_smoke_test_artefacts/Release/m2m_plugin_smoke_test \
+    build/plugin/MICtoMIDI_artefacts/Release/VST3/MICtoMIDI.vst3
+
+# Renders the editor (both modes, default and minimum size) to PNG files
+build/tools/plugin-smoke-test/m2m_ui_snapshot_artefacts/Release/m2m_ui_snapshot /tmp/m2m-ui
+```
