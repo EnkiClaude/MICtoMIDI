@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace m2m
 {
@@ -19,8 +20,7 @@ namespace
     constexpr double riseWindowS   = 0.02;
     constexpr double postMaskTauS  = 0.025;
     constexpr float postMaskGain   = 0.5f;
-    constexpr float lowBandHz      = 500.0f;
-    constexpr float midBandHz      = 4000.0f;
+    constexpr float dipIgnoreDb    = 6.0f;
 
     float powerToDb (float p) noexcept
     {
@@ -40,6 +40,18 @@ void OnsetDetector::prepare (double sampleRate)
     numBins = fftN / 2 + 1;
 
     fft.prepare (fftN);
+
+    {
+        // 2nd-order Butterworth high-pass at 1 kHz for the dip detector
+        const double w0 = 2.0 * std::numbers::pi * std::min (1000.0, 0.45 * sr) / sr;
+        const double cw = std::cos (w0), alpha = std::sin (w0) / std::numbers::sqrt2;
+        const double a0 = 1.0 + alpha;
+        hpB0 = static_cast<float> ((1.0 + cw) * 0.5 / a0);
+        hpB1 = static_cast<float> (-(1.0 + cw) / a0);
+        hpB2 = hpB0;
+        hpA1 = static_cast<float> (-2.0 * cw / a0);
+        hpA2 = static_cast<float> ((1.0 - alpha) / a0);
+    }
     window.assign (static_cast<std::size_t> (fftN), 0.0f);
     makeHann (window.data(), fftN);
     frame.assign (static_cast<std::size_t> (fftN), 0.0f);
@@ -71,6 +83,9 @@ void OnsetDetector::reset() noexcept
     std::fill (dHist.begin(), dHist.end(), 0.0f);
     std::fill (fineDb.begin(), fineDb.end(), floorDb);
     std::fill (eHist.begin(), eHist.end(), floorDb);
+    eHpPrev[0] = eHpPrev[1] = floorDb;
+    hpS1 = hpS2 = 0.0f;
+    hpEnergy = 0.0f;
     eWrite = 0;
 
     histWrite = hopFill = subFill = 0;
@@ -111,6 +126,12 @@ int OnsetDetector::process (const float* mono, int n, OnsetEvent* out, int maxOu
         histWrite = (histWrite + 1 == fftN) ? 0 : histWrite + 1;
 
         hopEnergy += x * x;
+        {
+            const float y = hpB0 * x + hpS1;
+            hpS1 = hpB1 * x - hpA1 * y + hpS2;
+            hpS2 = hpB2 * x - hpA2 * y;
+            hpEnergy += y * y;
+        }
         hopPeak = std::max (hopPeak, ax);
         subPeak = std::max (subPeak, ax);
 
@@ -132,6 +153,7 @@ int OnsetDetector::process (const float* mono, int n, OnsetEvent* out, int maxOu
 
             hopFill = 0;
             hopEnergy = 0.0f;
+            hpEnergy = 0.0f;
             hopPeak = 0.0f;
         }
     }
@@ -166,37 +188,24 @@ bool OnsetDetector::analyseHop (OnsetEvent& ev) noexcept
 
     // Scale so a full-scale sine reads ~1 in its bin (Hann coherent gain = 0.5).
     const float magScale = 4.0f / static_cast<float> (fftN);
-    const float binHz = static_cast<float> (sr) / static_cast<float> (fftN);
-    const int lowEnd = std::clamp (static_cast<int> (lowBandHz / binHz) + 1, 1, numBins);
-    const int midEnd = std::clamp (static_cast<int> (midBandHz / binHz) + 1, lowEnd + 1, numBins);
-
     for (int k = 0; k < numBins; ++k)
         curLog[static_cast<std::size_t> (k)] = std::log1p (logGamma * magScale * mags[static_cast<std::size_t> (k)]);
 
     // SuperFlux-style: compare against the max of the 3 neighbouring bins of
     // the previous frame, so gliding partials (kick pitch drop) are no onset.
-    float fluxLow = 0.0f, fluxMid = 0.0f, fluxHigh = 0.0f;
+    // Averaged over all bins: the low variance keeps steady noise quiet; the
+    // energy-rise terms below carry hits confined to few bins (kicks).
+    float flux = 0.0f;
     for (int k = 0; k < numBins; ++k)
     {
         const auto ks = static_cast<std::size_t> (k);
         float ref = prevLog[ks];
         if (k > 0)            ref = std::max (ref, prevLog[ks - 1]);
         if (k + 1 < numBins)  ref = std::max (ref, prevLog[ks + 1]);
-        const float diff = std::max (0.0f, curLog[ks] - ref);
-
-        if (k < lowEnd)       fluxLow += diff;
-        else if (k < midEnd)  fluxMid += diff;
-        else                  fluxHigh += diff;
+        flux += std::max (0.0f, curLog[ks] - ref);
     }
     std::swap (prevLog, curLog);
-
-    fluxLow  /= static_cast<float> (lowEnd);
-    fluxMid  /= static_cast<float> (midEnd - lowEnd);
-    fluxHigh /= static_cast<float> (std::max (1, numBins - midEnd));
-    // Mean of the bands plus the strongest band: a hit confined to one band
-    // (kick, hat) is not diluted by the quiet bands.
-    const float flux = 0.5f * (fluxLow + fluxMid + fluxHigh) / 3.0f
-                     + 0.5f * std::max ({ fluxLow, fluxMid, fluxHigh });
+    flux /= static_cast<float> (numBins);
 
     // Broadband rise of the hop energy against the previous two hops.
     const float e = powerToDb (hopEnergy / static_cast<float> (hop));
@@ -207,7 +216,20 @@ bool OnsetDetector::analyseHop (OnsetEvent& ev) noexcept
     eHist[static_cast<std::size_t> (eWrite)] = e;
     eWrite = (eWrite + 1) % static_cast<int> (eHist.size());
 
-    const float d = flux + rise / riseScaleDb;
+    // Dip-then-rise of the high-passed (> 1 kHz) hop energy: a new sound that
+    // starts right after the previous one was cut off (the mouth closes
+    // between two sounds) shows as a short gap even when its level is no
+    // higher than the tail it replaces. Small fluctuations are ignored.
+    const float eHp = powerToDb (hpEnergy / static_cast<float> (hop));
+    // Only where the high band carries a real part of the recent energy (not the
+    // filtered ripple of a low tone such as a kick).
+    const float dipRise = eHp > std::max (e, prevMax) - 10.0f
+                            ? std::clamp (eHp - std::min (eHpPrev[0], eHpPrev[1]) - dipIgnoreDb, 0.0f, maxRiseDb)
+                            : 0.0f;
+    eHpPrev[1] = eHpPrev[0];
+    eHpPrev[0] = eHp;
+
+    const float d = flux + (rise + dipRise) / riseScaleDb;
 
     // Threshold for the newest frame from the history *before* it.
     // Plus a decaying mask after each onset: noisy tails (clap, open hat)

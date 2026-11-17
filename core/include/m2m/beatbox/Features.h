@@ -62,8 +62,12 @@ public:
     int maxWindowSamples() const noexcept { return maxN; }
 
     /** window: n samples starting at the onset; n is clamped to
-        maxWindowSamples(). */
-    FeatureVector extract (const float* window, int n) noexcept;
+        maxWindowSamples(). Optional pre: the preN samples just before the
+        onset; their power spectrum (scaled to the window length) is
+        subtracted before the spectral features are computed, so the decaying
+        tail of a previous sound (e.g. a kick under a hat) does not dominate.
+        Temporal features always use the raw window. */
+    FeatureVector extract (const float* window, int n, const float* pre = nullptr, int preN = 0) noexcept;
 
 private:
     void computeSpectral (int n, FeatureVector& f) noexcept;
@@ -71,10 +75,11 @@ private:
 
     double sr = 48000.0;
     int maxN = 1920, fftN = 4096, numBins = 2049;
-    int hannLen = -1;
+    int hannLen = -1, preHannLen = -1;
+    double preScale = 0.0;
 
     Fft fft;
-    std::vector<float> hann, frame, mags, logFreq, scratch;
+    std::vector<float> hann, preHann, frame, mags, preMags, logFreq, scratch;
 };
 
 } // namespace m2m

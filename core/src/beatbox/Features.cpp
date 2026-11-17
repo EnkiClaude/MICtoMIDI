@@ -54,6 +54,9 @@ void FeatureExtractor::prepare (double sampleRate, float maxWindowMs)
     hann.assign (static_cast<std::size_t> (maxN), 0.0f);
     frame.assign (static_cast<std::size_t> (fftN), 0.0f);
     mags.assign (static_cast<std::size_t> (numBins), 0.0f);
+    preMags.assign (static_cast<std::size_t> (numBins), 0.0f);
+    preHann.assign (static_cast<std::size_t> (maxN), 0.0f);
+    preHannLen = -1;
     scratch.assign (static_cast<std::size_t> (maxN), 0.0f);
 
     logFreq.assign (static_cast<std::size_t> (numBins), 0.0f);
@@ -71,7 +74,24 @@ int FeatureExtractor::windowSamples (float ms) const noexcept
     return std::clamp (n, 16, maxN);
 }
 
-FeatureVector FeatureExtractor::extract (const float* window, int n) noexcept
+namespace
+{
+    void makeSymmetricHann (std::vector<float>& w, int n) noexcept
+    {
+        for (int i = 0; i < n; ++i)
+            w[static_cast<std::size_t> (i)] = static_cast<float> (0.5 - 0.5 * std::cos (2.0 * std::numbers::pi * (i + 0.5) / n));
+    }
+
+    double sumSquares (const std::vector<float>& w, int n) noexcept
+    {
+        double s = 0.0;
+        for (int i = 0; i < n; ++i)
+            s += static_cast<double> (w[static_cast<std::size_t> (i)]) * w[static_cast<std::size_t> (i)];
+        return s;
+    }
+}
+
+FeatureVector FeatureExtractor::extract (const float* window, int n, const float* pre, int preN) noexcept
 {
     FeatureVector f;
     n = std::clamp (n, 0, maxN);
@@ -80,10 +100,33 @@ FeatureVector FeatureExtractor::extract (const float* window, int n) noexcept
 
     if (n != hannLen)
     {
-        // symmetric Hann over exactly n samples
-        for (int i = 0; i < n; ++i)
-            hann[static_cast<std::size_t> (i)] = static_cast<float> (0.5 - 0.5 * std::cos (2.0 * std::numbers::pi * (i + 0.5) / n));
+        makeSymmetricHann (hann, n); // symmetric Hann over exactly n samples
         hannLen = n;
+    }
+
+    // Spectrum of what was already sounding just before the onset, scaled to
+    // the window's length, so it can be subtracted (a hat on a kick's tail).
+    preScale = 0.0;
+    preN = pre != nullptr ? std::min (preN, maxN) : 0;
+    if (preN >= 16)
+    {
+        if (preN != preHannLen)
+        {
+            makeSymmetricHann (preHann, preN);
+            preHannLen = preN;
+        }
+        std::fill (frame.begin(), frame.end(), 0.0f);
+        float prePeak = 0.0f;
+        for (int i = 0; i < preN; ++i)
+        {
+            frame[static_cast<std::size_t> (i)] = pre[i] * preHann[static_cast<std::size_t> (i)];
+            prePeak = std::max (prePeak, std::abs (pre[i]));
+        }
+        if (prePeak > 0.0f)
+        {
+            fft.magnitudes (frame.data(), preMags.data());
+            preScale = sumSquares (hann, n) / sumSquares (preHann, preN);
+        }
     }
 
     std::fill (frame.begin(), frame.end(), 0.0f);
@@ -109,7 +152,9 @@ void FeatureExtractor::computeSpectral (int n, FeatureVector& f) noexcept
     for (int k = minBin; k <= maxBin; ++k)
     {
         const auto ks = static_cast<std::size_t> (k);
-        const double p = static_cast<double> (mags[ks]) * mags[ks];
+        double p = static_cast<double> (mags[ks]) * mags[ks];
+        if (preScale > 0.0)
+            p = std::max (0.0, p - preScale * preMags[ks] * preMags[ks]);
         mags[ks] = static_cast<float> (p); // reuse as power
         const double hz = k * binHz;
         const int band = hz < 150.0 ? 0 : hz < 1000.0 ? 1 : hz < 5000.0 ? 2 : 3;

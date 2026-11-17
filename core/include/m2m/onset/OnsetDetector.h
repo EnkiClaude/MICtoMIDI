@@ -28,13 +28,20 @@ struct OnsetParams
 
     Detection function per hop (hop 64 @ 48 kHz, FFT 256 @ 48 kHz, both scaled
     with the sample rate):
-        d = mean positive difference of log-compressed magnitudes (spectral flux)
-          + broadband rise of the hop energy (dB / 20) against the previous hops.
+        d = SuperFlux: mean over bins of the positive difference of
+            log-compressed magnitudes against the max of the 3 neighbouring
+            bins of the previous frame (ignores gliding partials)
+          + (rise + dipRise) / 20, where
+            rise    = hop energy (dB) above the max of the previous ~20 ms
+            dipRise = high-passed (> 1 kHz) hop energy rise out of a short dip
+                      of >= 6 dB (a sound that starts as the previous one is
+                      cut off), only where that band carries the energy.
     Adaptive threshold: moving median of d over ~100 ms + margin (from
-    sensitivity) + absolute floor; a candidate must also exceed minLevelDb.
-    Peak picking uses one hop of look-ahead. The onset time is then refined
-    with a fine (sub-hop) envelope: the sub-block with the largest level rise
-    in the frame that triggered.
+    sensitivity) + a mask that decays (25 ms) after each onset; the frame's
+    peak must also exceed minLevelDb. Peak picking uses one hop of
+    look-ahead, then a refractory period. The onset time is refined with a
+    fine envelope (hop / 4 sub-blocks): the sub-block with the largest level
+    rise in the frame that triggered.
 
     Output does not depend on how the input is split into blocks.
     prepare() allocates; everything else is real-time safe. */
@@ -93,6 +100,9 @@ private:
     float peakPrev1 = 0.0f, peakCur = 0.0f; // frame peak levels
     std::vector<float> eHist;           // ring of recent hop energies (dB), ~20 ms
     int eWrite = 0;
+    float hpB0 = 1.0f, hpB1 = 0.0f, hpB2 = 0.0f, hpA1 = 0.0f, hpA2 = 0.0f, hpS1 = 0.0f, hpS2 = 0.0f;
+    float hpEnergy = 0.0f;
+    float eHpPrev[2] { -100.0f, -100.0f };
 
     // fine envelope: per sub-block peak (dB), ring indexed by absolute sub-block
     std::vector<float> fineDb;

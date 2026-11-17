@@ -67,6 +67,24 @@ TEST_CASE ("OnsetDetector: mixed synthetic patterns 90-180 BPM", "[onset][beatbo
     CHECK (total.meanAbsErrMs() <= 5.0);
 }
 
+TEST_CASE ("OnsetDetector: patterns over a -40 dBFS noise floor", "[onset][beatbox]")
+{
+    Rng rng (4321);
+    MatchStats total;
+    for (double bpm : { 100.0, 140.0, 180.0 })
+    {
+        auto p = makePattern (sr, bpm, 4, rng);
+        const auto noise = makeNoise (sr, static_cast<double> (p.audio.size()) / sr, -40.0f, rng);
+        for (std::size_t i = 0; i < p.audio.size(); ++i)
+            p.audio[i] += noise[i];
+        total.add (matchOnsets (truthSamples (p), detect (p.audio, 128), sr, 25.0));
+    }
+    std::printf ("[onset] patterns + -40 dBFS noise: TP=%d FP=%d FN=%d F1=%.4f mean|err|=%.2f ms\n",
+                 total.truePositives, total.falsePositives, total.falseNegatives, total.f1(), total.meanAbsErrMs());
+    CHECK (total.f1() >= 0.95);
+    CHECK (total.meanAbsErrMs() <= 5.0);
+}
+
 TEST_CASE ("OnsetDetector: per-sound timing and single trigger", "[onset][beatbox]")
 {
     Rng rng (77);
@@ -112,11 +130,23 @@ TEST_CASE ("OnsetDetector: no onsets on silence, low noise or a steady tone", "[
     SECTION ("-50 dBFS white noise")
     {
         Rng rng (5);
-        std::vector<float> s (n);
-        const float g = dbToGainT (-50.0f) * std::sqrt (3.0f); // uniform noise: rms = peak / sqrt 3
-        for (auto& v : s)
-            v = g * rng.noise();
+        const auto s = makeNoise (sr, 3.0, -50.0f, rng);
         CHECK (detect (s, 128).empty());
+
+        // also without the absolute level floor: the adaptive threshold alone
+        m2m::OnsetParams noFloor;
+        noFloor.minLevelDb = -120.0f;
+        const auto d = detect (s, 128, noFloor);
+        std::printf ("[onset] -50 dBFS noise, no level floor: %zu onsets in 3 s\n", d.size());
+        CHECK (d.empty());
+
+        // louder steady noise is above the floor, so this is the adaptive threshold
+        for (float db : { -30.0f, -10.0f })
+        {
+            Rng rng2 (6);
+            INFO (db << " dBFS noise");
+            CHECK (detect (makeNoise (sr, 3.0, db, rng2), 128).empty());
+        }
     }
 
     SECTION ("steady 440 Hz tone: at most the start, nothing afterwards")

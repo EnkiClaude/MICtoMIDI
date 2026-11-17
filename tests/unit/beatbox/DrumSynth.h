@@ -36,6 +36,13 @@ public:
     /** White noise sample in [-1, 1). */
     float noise() noexcept { return static_cast<float> (2.0 * uniform() - 1.0); }
 
+    /** Standard normal sample (Box-Muller). */
+    float gauss() noexcept
+    {
+        const double u1 = std::max (uniform(), 1.0e-300), u2 = uniform();
+        return static_cast<float> (std::sqrt (-2.0 * std::log (u1)) * std::cos (2.0 * std::numbers::pi * u2));
+    }
+
     int intRange (int lo, int hiInclusive) noexcept
     {
         return lo + static_cast<int> (uniform() * (hiInclusive - lo + 1));
@@ -239,6 +246,18 @@ inline void mixInto (std::vector<float>& dst, const std::vector<float>& src, std
         dst.resize (start + src.size(), 0.0f);
     for (std::size_t i = 0; i < src.size(); ++i)
         dst[start + i] += src[i];
+}
+
+/** Gaussian white noise at the given RMS level, with a linear fade-in (a
+    noise floor does not start with a click). */
+inline std::vector<float> makeNoise (double sr, double seconds, float rmsDb, Rng& rng, double fadeInS = 0.2)
+{
+    std::vector<float> s (static_cast<std::size_t> (seconds * sr));
+    const float g = dbToGainT (rmsDb);
+    const auto fade = static_cast<std::size_t> (fadeInS * sr);
+    for (std::size_t i = 0; i < s.size(); ++i)
+        s[i] = g * rng.gauss() * (i < fade ? static_cast<float> (i) / static_cast<float> (fade) : 1.0f);
+    return s;
 }
 
 struct TruthHit
