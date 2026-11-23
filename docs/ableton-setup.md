@@ -7,6 +7,12 @@ MICtoMIDI listens to your microphone and plays MIDI notes:
 
 There are two ways to get its MIDI into Live. Pick one.
 
+> **For now, use the standalone app (Option B).** It has been confirmed to
+> work with Live on a Mac. The VST3 plugin did not show up in Live's plug-in
+> list in the first real test; that is being investigated separately. All
+> Melody and Beatbox features, including Note lock and Stability, are the
+> same in the app.
+
 | | Plugin (inside Live) | Standalone app |
 |---|---|---|
 | Setup | Three tracks, a little routing | Open the app, pick a MIDI input in Live |
@@ -68,11 +74,38 @@ use the plugin instead.
 - If the input meter stays below the yellow line, notes will not start: raise
   **Gain** or lower **On level**.
 - Stray notes on breaths or noise: raise **Confidence** or **On level**.
-- Notes jumping around with vibrato: open **Advanced** and raise **Hysteresis**.
+- Notes jumping around with vibrato or a wobbly voice: turn **Stability**
+  up (see below).
 - Only want notes from a key: set **Scale** and **Root**.
 - **Min freq** decides how low it listens. Lower values make every note a bit
   later (the latency is shown right under it). If you only sing above ~150 Hz,
   raise it for snappier notes.
+
+## If it's hard to hold a steady note
+
+Most voices waver a little: the pitch drifts, wobbles, or slides up into a
+note. MICtoMIDI can then play extra, unwanted notes. Try these, in order:
+
+1. **Set Scale and Root to the key of your song** (e.g. *Major*, *C*). Notes
+   outside the key can no longer be chosen, which removes most of the wrong
+   ones.
+2. **Turn Stability up** (the *Steady notes* panel above the pitch trace,
+   *Loose ↔ Tight*). Tighter means your pitch must move further and longer
+   before the note changes. It costs a little delay: the panel shows the
+   latency (about 22 ms at the default 40 %, about 32 ms fully Tight).
+3. **Try Note lock** (*Note lock — one note per syllable*). Each sung
+   syllable now gives exactly one note, picked once your pitch has settled.
+   While you hold it, wobbling never changes it. To play the next note,
+   **start a new syllable**: sing "da-da-da" or "la-la-la" instead of one
+   long "aaah". A clear jump of more than a whole tone also changes the
+   note, but smaller legato steps (a semitone) need a new syllable. Note lock
+   waits until a slide into the note is over, so a scooped note comes a bit
+   later instead of starting on the wrong note.
+
+Stability sets several Advanced values at once (Hysteresis, Min stable, Min
+note). They are greyed out in **Advanced** and show what Stability chose. If
+you prefer to set them yourself, switch on **Manual** in Advanced; Stability
+is then ignored.
 
 ## Beatbox mode in 30 seconds
 
@@ -105,6 +138,7 @@ so you can load it into another project with **Import…**.
 
 The header shows how long MICtoMIDI waits before it can decide on a note
 ("Latency … ms"). It is reported to Live. Typical values: Melody around
-25–30 ms, Beatbox around 20–25 ms. Lower it with a higher **Min freq** (Melody)
-or a shorter **Analysis** window (Beatbox). Use a small audio buffer
+20–30 ms (Note lock adds about 5 ms, a tight Stability up to 10–15 ms),
+Beatbox around 20–25 ms. Lower it with a higher **Min freq** or a looser
+**Stability** (Melody) or a shorter **Analysis** window (Beatbox). Use a small audio buffer
 (64–128 samples) in Live's audio settings.

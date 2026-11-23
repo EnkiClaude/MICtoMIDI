@@ -9,6 +9,11 @@ You need: headphones, a microphone, Ableton Live 11 or 12, about 30 minutes.
 How to set everything up is in [ableton-setup.md](ableton-setup.md); the
 routing steps are the same as before.
 
+**Use the standalone app (section E) for the Melody tests for now.** It is
+confirmed to work in Live; the VST3 did not appear in Live in the first test
+and is being looked at separately. If the plugin does show up for you, run
+section A as well and say so in your report.
+
 ## 0. Get the build
 
 Build it yourself:
@@ -71,12 +76,35 @@ Select **Melody**. Track 3: a simple synth.
       (and stops if you set track 3 to channel 1 only).
 - [ ] Move **Min freq** from 80 Hz to 150 Hz: the latency readout in the header
       (and under the slider) goes down.
-- [ ] Open **Advanced**, raise **Hysteresis**: vibrato is even less likely to
-      change the note.
+- [ ] Open **Advanced**: Hysteresis, Min stable (and Min note under Notes) are
+      greyed out and say "Stability sets …". Switch on **Manual**: they become
+      editable and the Stability slider greys out. Raise **Hysteresis**:
+      vibrato is even less likely to change the note. Switch Manual off again.
+
 - [ ] While a note is held, click **Beatbox**: the note stops immediately (no stuck note).
 - [ ] While a note is held, bypass the plugin (device on/off): the note stops.
 
 Rate the melody tracking from 1 (unusable) to 5 (feels like playing a keyboard): ___
+
+### If it's hard to hold a steady note
+
+- [ ] Set **Scale** + **Root** to the key you sing in. Fewer wrong notes?
+- [ ] Sing one long, slightly wobbly note with **Follow pitch** at Stability
+      40 %: count the notes it plays: ___
+- [ ] Same note at Stability 100 % (Tight): notes: ___. The latency shown in
+      the Steady notes panel goes up (about 32 ms).
+- [ ] Switch to **Note lock — one note per syllable**, sing the same wobbly
+      note: exactly **one** note however much it wobbles.
+- [ ] In Note lock, sing a melody as "da-da-da" (a new syllable per note):
+      every syllable is one note, including repeated pitches.
+- [ ] In Note lock, slide up into a note (a scoop): the note comes slightly
+      later but is the right one, with no short wrong note first.
+- [ ] In Note lock, sing legato without new syllables: steps of a whole tone
+      or more still change the note; a semitone step does not (expected).
+- [ ] Follow, Stability and Manual come back as set after reopening (plugin:
+      save and reopen the Live set; app: quit and reopen it).
+
+Rate a wobbly voice with your best settings from 1 to 5: ___ (which settings? ___)
 
 ## C. Beatbox mode
 

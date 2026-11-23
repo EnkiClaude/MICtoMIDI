@@ -12,7 +12,9 @@ See [PLAN.md](PLAN.md) for the full design and roadmap.
 
 - **Melody mode:** sing, hum or whistle → MIDI notes (YIN/MPM pitch detection,
   note tracking with vibrato hysteresis, retrigger, scale snap, transpose,
-  level-based velocity). The window shows the detected note, Hz, cents,
+  level-based velocity). For wavering voices: a **Stability** control
+  (Loose ↔ Tight) and **Note lock** (one note per sung syllable; pitch
+  wobble never changes a held note). The window shows the detected note, Hz, cents,
   confidence and a scrolling pitch trace with the sent notes.
 - **Beatbox mode:** vocal percussion → General MIDI drums on channel 10
   (kick, snare, clap, closed hat, open hat). Rule-based classifier out of the box,
@@ -21,9 +23,11 @@ See [PLAN.md](PLAN.md) for the full design and roadmap.
 - Latency is reported to the host and shown in the window (about 20–30 ms in
   Melody mode and about 19 ms in Beatbox mode with the default settings).
 - Accuracy is measured on every change by an offline harness (`m2m-cli`) with
-  41 synthetic scenarios (23 melody, 17 beatbox, 1 trigger) and a CI regression gate; see [docs/m2m-cli.md](docs/m2m-cli.md).
+  44 synthetic scenarios (26 melody, 17 beatbox, 1 trigger) and a CI regression gate; see [docs/m2m-cli.md](docs/m2m-cli.md).
 
-Not yet verified on a real Mac in Ableton Live: see the manual checklist
+On a real Mac the standalone app works with Ableton Live and is the
+recommended way to use it for now (the VST3 did not appear in Live in the
+first test; under investigation). Manual checklist:
 [docs/phase1-ableton-test.md](docs/phase1-ableton-test.md).
 
 ## Using it
