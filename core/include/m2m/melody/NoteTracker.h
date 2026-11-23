@@ -40,6 +40,12 @@ struct NoteTrackerParams
     float releaseMs             = 30.0f;
     float attackWindowMs        = 10.0f;
     bool  retriggerEnabled      = true;
+
+    // Note lock ("one note per syllable"); see the class comment.
+    bool  lock                  = false;
+    float lockSettleMs          = 40.0f;   // pitch window that chooses a locked note
+    float lockLeapSemitones     = 0.0f;    // big-leap escape: jump > this (0 = off) ...
+    float lockLeapMs            = 80.0f;   // ... held this long changes the locked note
 };
 
 /** Monophonic note state machine (PLAN.md section 4): Idle -> Pending -> Active.
@@ -60,6 +66,21 @@ struct NoteTrackerParams
     - Active -> Idle: level < off-threshold or confidence lost, continuously for
       releaseMs.
     - Notes are never shorter than minNoteMs (off/change/retrigger wait).
+
+    Note lock (params.lock): the pitch only chooses the note at its start.
+    - Pending -> Active: the note is chosen from the pitch AFTER it settles:
+      once the last lockSettleMs of frames (since Pending began) spread over
+      at most kLockSpreadCents, or at the latest lockSettleMs +
+      kLockMaxExtraMs after Pending began, the note is the snapped median of
+      those frames. A scoop into the note keeps the spread wide, so it does
+      not choose the note. The attack window applies as usual.
+    - Active: pitch movement never changes the note (no legato change).
+      The note ends on release (as above) or on a retrigger (amplitude
+      re-onset), which starts a new note chosen afresh by the same rule.
+    - Big-leap escape (lockLeapSemitones > 0): a pitch further than
+      lockLeapSemitones from the note, on the same side, for lockLeapMs ->
+      Note Off(old) + Note On(snapped median of the last lockSettleMs) at the
+      same time, so wide legato intervals still come through.
 
     Invariants: at most one note sounding; every On is followed by an Off
     (flush() ends a held note); event times never decrease. Real-time safe. */
@@ -97,6 +118,13 @@ private:
     float peakSince (std::int64_t start) const noexcept;
     bool withinBand (float pitch, int centre) const noexcept;
 
+    // Note lock helpers.
+    void lockClear() noexcept { lockCount = 0; lockWrite = 0; }
+    void lockPush (std::int64_t t, float pitch) noexcept;
+    /** Median of the frames newer than `since`; spread = max - min (semitones). */
+    float lockMedian (std::int64_t since, float& spread) noexcept;
+    int processLock (const TrackerFrame& f, bool usable, bool levelOn, bool levelLost, TrackerEvent* out) noexcept;
+
     NoteTrackerParams params;
     ScaleSnap snapper;
     double sr = 48000.0;
@@ -118,6 +146,18 @@ private:
     std::int64_t attackStart = -1;
     float attackPeakDb = -120.0f;
     bool levelArmed = true;      // level has been below the off-threshold since the last attack
+
+    // Note lock: recent usable pitches (Pending: since it began; Active: for the leap rule).
+    static constexpr int lockHistory = 128;
+    std::array<float, lockHistory> lockPitches {};
+    std::array<std::int64_t, lockHistory> lockTimes {};
+    std::array<float, lockHistory> lockSorted {};
+    int lockWrite = 0, lockCount = 0;
+    std::int64_t lockSince = 0;       // Pending: when the settle window began
+    std::int64_t leapSince = -1;      // Active: when the pitch left the leap band
+    int leapSide = 0;                 // +1 above, -1 below
+    std::int64_t lockSettleSamples = 0, lockMaxWaitSamples = 0, lockLeapSamples = 0;
+    float lockLeapSemis = 0.0f;
 
     // Recent hop peaks for the velocity of legato changes.
     static constexpr int peakHistory = 64;

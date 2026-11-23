@@ -5,6 +5,7 @@
 
 #include "m2m/trigger/LevelTriggerEngine.h"
 #include "m2m/melody/MelodyEngine.h"
+#include "m2m/melody/Stability.h"
 #include "m2m/beatbox/BeatboxEngine.h"
 
 #include <cmath>
@@ -85,6 +86,26 @@ namespace
             floatSetting<P> ("retriggerSensitivity", "0..1", &P::retriggerSensitivity),
             floatSetting<P> ("attackWindowMs", "velocity attack window (ms)", &P::attackWindowMs),
             { "transpose", "semitones", [] (P& p, const std::string& v) { return parseIntValue (v, p.transpose); } },
+            { "follow", "pitch follow: free | lock (note lock, one note per syllable)", [] (P& p, const std::string& v)
+              {
+                  if (v == "free") { p.pitchFollow = PitchFollow::Free; return true; }
+                  if (v == "lock") { p.pitchFollow = PitchFollow::Lock; return true; }
+                  return false;
+              } },
+            { "stability", "macro 0..1 (Loose..Tight): sets changeHysteresisCents, minStableMs, medianFrames, "
+                           "smoothingMs, minNoteMs, lockSettleMs (later --set keys override)",
+              [] (P& p, const std::string& v)
+              {
+                  float a = 0.0f;
+                  if (! parseFloat (v, a) || a < 0.0f || a > 1.0f)
+                      return false;
+                  p = applyStability (p, a);
+                  return true;
+              } },
+            floatSetting<P> ("lockSettleMs", "lock: settle window that chooses the note (ms)", &P::lockSettleMs),
+            floatSetting<P> ("lockLeapSemitones", "lock: big-leap escape threshold (semitones, 0 = off)", &P::lockLeapSemitones),
+            floatSetting<P> ("lockLeapMs", "lock: big-leap hold time (ms)", &P::lockLeapMs),
+            floatSetting<P> ("lockRetriggerBoost", "lock: added to retriggerSensitivity", &P::lockRetriggerBoost),
         };
         return s;
     }
@@ -219,11 +240,21 @@ std::string describeEngine (const std::string& mode, const m2m::IEngine& engine)
         const auto& p = static_cast<const m2m::MelodyEngine&> (engine).getParams();
         std::snprintf (buf, sizeof (buf),
                        "detector=%s minHz=%g maxHz=%g confidenceThreshold=%g medianFrames=%d minStableMs=%g "
-                       "attackWindowMs=%g changeHysteresisCents=%g",
+                       "attackWindowMs=%g changeHysteresisCents=%g smoothingMs=%g minNoteMs=%g follow=%s",
                        p.detector == PitchAlgorithm::Mpm ? "mpm" : "yin", static_cast<double> (p.minHz),
                        static_cast<double> (p.maxHz), static_cast<double> (p.confidenceThreshold), p.medianFrames,
                        static_cast<double> (p.minStableMs), static_cast<double> (p.attackWindowMs),
-                       static_cast<double> (p.changeHysteresisCents));
+                       static_cast<double> (p.changeHysteresisCents), static_cast<double> (p.smoothingMs),
+                       static_cast<double> (p.minNoteMs),
+                       p.pitchFollow == PitchFollow::Lock ? "lock" : "free");
+        if (p.pitchFollow == PitchFollow::Lock)
+        {
+            char lock[160];
+            std::snprintf (lock, sizeof (lock), " lockSettleMs=%g lockLeapSemitones=%g lockLeapMs=%g lockRetriggerBoost=%g",
+                           static_cast<double> (p.lockSettleMs), static_cast<double> (p.lockLeapSemitones),
+                           static_cast<double> (p.lockLeapMs), static_cast<double> (p.lockRetriggerBoost));
+            return std::string (buf) + lock;
+        }
         return buf;
     }
     if (mode == "beatbox")

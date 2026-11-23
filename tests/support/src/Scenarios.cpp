@@ -606,6 +606,247 @@ namespace
         return tl.finish();
     }
 
+    //==========================================================================
+    // Unsteady (untrained) singer: the intended notes are the truth, the sung
+    // pitch wanders around them.
+    //
+    // Per note: slow wander (two slow sines, 0.35-1.8 Hz, peak +-50..80
+    // cents, growing from 15 % to full over 350 ms after the note starts),
+    // fast jitter (+-10..20 cents, random knots every 25-45 ms, cosine
+    // interpolated, continuous across the phrase), irregular vibrato (0-25
+    // cents, 4.5-6.5 Hz with a wandering rate, fading in after 250 ms) and,
+    // on some articulated notes, a scoop (60-150 cents below, or 60-100
+    // above, gone after 30-70 ms). Joins between notes:
+    //   Gap    - "normal" re-articulation: the sound stops for 60-120 ms;
+    //   Dip    - "soft" re-articulation: a 9-15 dB level dip, 50-70 ms wide,
+    //            no silence; the pitch moves inside the dip (truth onset =
+    //            dip centre);
+    //   Legato - no level change; 30-70 ms portamento centred on the truth
+    //            onset; no scoop.
+    // Everything comes from one seeded Rng, so the audio is deterministic.
+
+    enum class Join { Gap, Dip, Legato };
+
+    struct UnsteadyNote
+    {
+        int midi;
+        double seconds;
+        Join joinBefore;   // ignored for the first note
+    };
+
+    /** Pitch deviation (cents) of one note, as a function of the time since it began. */
+    struct Deviation
+    {
+        double wanderA = 0, f1 = 0, f2 = 0, ph1 = 0, ph2 = 0;
+        double scoopCents = 0, scoopSec = 0;
+        double vibDepth = 0;
+
+        double at (double t) const
+        {
+            const double tc = std::max (0.0, t);
+            const double ramp = std::min (1.0, 0.15 + 0.85 * tc / 0.35);
+            const double w = wanderA * ramp * (0.65 * std::sin (2.0 * 3.141592653589793 * f1 * tc + ph1)
+                                               + 0.35 * std::sin (2.0 * 3.141592653589793 * f2 * tc + ph2));
+            const double sc = (scoopSec > 0.0 && tc < scoopSec) ? scoopCents * (1.0 - tc / scoopSec) : 0.0;
+            return w + sc;
+        }
+
+        double vibratoGain (double t) const
+        {
+            return vibDepth * std::clamp ((t - 0.25) / 0.2, 0.0, 1.0);
+        }
+    };
+
+    /** Renders and appends one breath (notes joined by Dip or Legato). */
+    void unsteadyBreath (Timeline& tl, const std::vector<UnsteadyNote>& notes, Rng& rng,
+                         const Vowel& vowel, std::uint64_t breathSeed)
+    {
+        const double sr = tl.sr();
+        std::vector<double> starts;
+        double total = 0.0;
+        for (const auto& n : notes)
+        {
+            starts.push_back (total);
+            total += n.seconds;
+        }
+        const auto len = secondsToSamples (total, sr);
+
+        std::vector<Deviation> dev (notes.size());
+        std::vector<double> portamento (notes.size(), 0.0), dipDb (notes.size(), 0.0), dipSec (notes.size(), 0.0);
+        for (std::size_t k = 0; k < notes.size(); ++k)
+        {
+            auto& d = dev[k];
+            d.wanderA = rng.range (50.0, 80.0);
+            d.f1 = rng.range (0.35, 0.9);
+            d.f2 = rng.range (1.0, 1.8);
+            d.ph2 = rng.range (0.0, 6.283185307179586);
+            // The wander starts near the target: phases chosen so it is small at t = 0.
+            d.ph1 = rng.uniform() < 0.5 ? 0.0 : 3.141592653589793;
+            d.vibDepth = rng.range (0.0, 25.0);
+            const bool articulated = k == 0 || notes[k].joinBefore != Join::Legato;
+            if (articulated && rng.uniform() < 0.4)
+            {
+                d.scoopCents = rng.uniform() < 0.8 ? -rng.range (60.0, 150.0) : rng.range (60.0, 100.0);
+                d.scoopSec = rng.range (0.03, 0.07);
+            }
+            if (k > 0 && notes[k].joinBefore == Join::Legato)
+                portamento[k] = rng.range (0.03, 0.07);
+            if (k > 0 && notes[k].joinBefore == Join::Dip)
+            {
+                dipDb[k] = rng.range (9.0, 15.0);
+                dipSec[k] = rng.range (0.05, 0.07);
+            }
+        }
+
+        // Jitter knots (continuous over the breath).
+        std::vector<double> knotT { 0.0 }, knotV { rng.uniformSigned() };
+        const double jitterA = rng.range (10.0, 20.0);
+        while (knotT.back() < total + 0.1)
+        {
+            knotT.push_back (knotT.back() + rng.range (0.025, 0.045));
+            knotV.push_back (rng.uniformSigned());
+        }
+        const double vibRate = rng.range (4.5, 6.5), vibWobble = rng.range (0.2, 0.6);
+
+        std::vector<double> f0 (len);
+        std::vector<double> gainDb (len, 0.0);
+        std::size_t knot = 0, k = 0;
+        double vibPhase = 0.0;
+        for (std::size_t i = 0; i < len; ++i)
+        {
+            const double t = static_cast<double> (i) / sr;
+            while (k + 1 < notes.size() && t >= starts[k + 1])
+                ++k;
+
+            // pitch of note j at time t (semitones)
+            auto pitchOf = [&] (std::size_t j)
+            {
+                const double rel = t - starts[j];
+                const double vib = dev[j].vibratoGain (rel) * std::sin (vibPhase);
+                return static_cast<double> (notes[j].midi) + (dev[j].at (rel) + vib) / 100.0;
+            };
+
+            double p = pitchOf (k);
+            // Legato portamento into the next note (centred on its onset) or
+            // still finishing the one into this note.
+            if (k + 1 < notes.size() && portamento[k + 1] > 0.0 && t > starts[k + 1] - 0.5 * portamento[k + 1])
+            {
+                const double x = (t - (starts[k + 1] - 0.5 * portamento[k + 1])) / portamento[k + 1];
+                const double s = x * x * (3.0 - 2.0 * x);
+                p = p + (pitchOf (k + 1) - p) * s;
+            }
+            else if (k > 0 && portamento[k] > 0.0 && t < starts[k] + 0.5 * portamento[k])
+            {
+                const double x = (t - (starts[k] - 0.5 * portamento[k])) / portamento[k];
+                const double s = x * x * (3.0 - 2.0 * x);
+                const double prev = pitchOf (k - 1);
+                p = prev + (p - prev) * s;
+            }
+
+            while (knot + 2 < knotT.size() && t >= knotT[knot + 1])
+                ++knot;
+            const double x = std::clamp ((t - knotT[knot]) / (knotT[knot + 1] - knotT[knot]), 0.0, 1.0);
+            const double c = 0.5 - 0.5 * std::cos (3.141592653589793 * x);
+            p += jitterA * (knotV[knot] + (knotV[knot + 1] - knotV[knot]) * c) / 100.0;
+
+            f0[i] = midiToHz (p);
+            vibPhase += 2.0 * 3.141592653589793 * (vibRate + vibWobble * std::sin (2.0 * 3.141592653589793 * 0.7 * t)) / sr;
+
+            // Level: slow +-1 dB swell, plus the soft re-articulation dips.
+            double g = 1.0 * std::sin (2.0 * 3.141592653589793 * 0.6 * t);
+            for (std::size_t j = 1; j < notes.size(); ++j)
+                if (dipDb[j] > 0.0)
+                {
+                    const double d = (t - starts[j]) / (0.5 * dipSec[j]);
+                    if (std::abs (d) < 1.0)
+                        g -= dipDb[j] * 0.5 * (1.0 + std::cos (3.141592653589793 * d));
+                }
+            gainDb[i] = g;
+        }
+
+        double refHz = 0.0;
+        for (const auto& n : notes)
+            refHz += hz (n.midi);
+        refHz /= static_cast<double> (notes.size());
+
+        auto sound = renderTrack (sr, f0, vowelPartials (refHz, vowel, sr), -12.0);
+        for (std::size_t i = 0; i < len; ++i)
+            sound[i] = static_cast<float> (sound[i] * std::pow (10.0, gainDb[i] / 20.0));
+        applyEnvelope (sound, sr, voiceEnv);
+        addBreath (sound, sr, -28.0, breathSeed);
+
+        std::vector<TruthNote> truth;
+        for (std::size_t j = 0; j < notes.size(); ++j)
+            truth.push_back ({ starts[j], starts[j] + notes[j].seconds, notes[j].midi });
+        tl.addSound (sound, truth);
+    }
+
+    /** A phrase: breaths separated by Gap joins (60-120 ms of silence). */
+    Scenario unsteadyPhrase (const char* name, double sr, const std::vector<UnsteadyNote>& notes, std::uint64_t seed,
+                             double restAfterBreath = -1.0)
+    {
+        Timeline tl (name, sr);
+        Rng rng (seed);
+        tl.rest (0.25);
+        std::vector<UnsteadyNote> breath;
+        int breaths = 0;
+        auto flush = [&]
+        {
+            if (breath.empty())
+                return;
+            unsteadyBreath (tl, breath, rng, breaths % 2 == 0 ? vowelA : vowelO, seed * 31u + static_cast<std::uint64_t> (breaths));
+            ++breaths;
+            breath.clear();
+        };
+        for (std::size_t i = 0; i < notes.size(); ++i)
+        {
+            if (i > 0 && notes[i].joinBefore == Join::Gap)
+            {
+                flush();
+                tl.rest (restAfterBreath > 0.0 ? restAfterBreath : rng.range (0.06, 0.12));
+            }
+            breath.push_back (notes[i]);
+        }
+        flush();
+        tl.rest (0.3);
+        return tl.finish();
+    }
+
+    Scenario unsteadySustained (double sr)
+    {
+        std::vector<UnsteadyNote> n;
+        const double lens[] = { 1.4, 1.2, 1.6, 1.3, 1.5, 1.4 };
+        int i = 0;
+        for (int m : { 57, 60, 64, 62, 59, 65 })
+            n.push_back ({ m, lens[i++], Join::Gap });
+        return unsteadyPhrase ("unsteady_sustained", sr, n, 1001u, 0.3);
+    }
+
+    Scenario unsteadyMelodyDetached (double sr)
+    {
+        // Mixed normal (Gap) and soft (Dip) re-articulations, repeated pitches included.
+        const int notes[] = { 60, 62, 64, 64, 62, 60, 57, 60, 64, 67, 67, 65, 64, 62, 60, 60 };
+        const Join joins[] = { Join::Gap, Join::Dip, Join::Gap, Join::Dip, Join::Dip, Join::Gap, Join::Dip, Join::Gap,
+                               Join::Dip, Join::Gap, Join::Dip, Join::Dip, Join::Gap, Join::Dip, Join::Gap, Join::Dip };
+        Rng lenRng (2002u);
+        std::vector<UnsteadyNote> n;
+        for (int i = 0; i < 16; ++i)
+            n.push_back ({ notes[i], lenRng.range (0.3, 0.5), joins[i] });
+        return unsteadyPhrase ("unsteady_melody_detached", sr, n, 2003u);
+    }
+
+    Scenario unsteadyMelodyLegato (double sr)
+    {
+        // Two breaths of legato steps (no level change between notes):
+        // whole tones, thirds, fourths and two semitone steps.
+        const int notes[] = { 60, 62, 64, 65, 67, 64, 60, 57, 60, 62, 65, 64, 62, 57 };
+        Rng lenRng (3002u);
+        std::vector<UnsteadyNote> n;
+        for (int i = 0; i < 14; ++i)
+            n.push_back ({ notes[i], lenRng.range (0.35, 0.55), i == 7 ? Join::Gap : Join::Legato });
+        return unsteadyPhrase ("unsteady_melody_legato", sr, n, 3003u, 0.3);
+    }
+
     Scenario humBackground (double sr, double humHz, const char* name)
     {
         // Mains hum (fundamental + 2nd/3rd harmonic) at -40 dBFS peak under
@@ -786,6 +1027,9 @@ namespace
             { { "pitch_drift", C::Melody, "sustained notes drifting slowly by +-30 cents" }, pitchDrift },
             { { "tremolo_vibrato", C::Melody, "+-40 cent vibrato with +-3 dB amplitude modulation; one note each" }, tremoloVibrato },
             { { "scoop_ups", C::Melody, "notes scooping up 150 cents in 60 ms, then +-30 cent drift; one note each" }, scoopsAndDrift },
+            { { "unsteady_sustained", C::Melody, "untrained singer: 6 long notes with +-50-80 ct wander, +-10-20 ct jitter, irregular vibrato, some scoops" }, unsteadySustained },
+            { { "unsteady_melody_detached", C::Melody, "untrained singer: 16 notes, normal (gap) and soft (9-15 dB dip) re-articulations, repeats" }, unsteadyMelodyDetached },
+            { { "unsteady_melody_legato", C::Melody, "untrained singer: 14 legato notes (30-70 ms portamento, no level dip), 2 breaths" }, unsteadyMelodyLegato },
             { { "hum_50hz", C::Melody, "sustained notes over 50 Hz mains hum at -40 dBFS (also in the gaps)" }, [] (double sr) { return humBackground (sr, 50.0, "hum_50hz"); } },
             { { "hum_60hz", C::Melody, "sustained notes over 60 Hz mains hum at -40 dBFS (also in the gaps)" }, [] (double sr) { return humBackground (sr, 60.0, "hum_60hz"); } },
             { { "silence", C::Melody, "3 s of digital silence; expect no notes" }, silenceScenario },

@@ -105,10 +105,19 @@ void MelodyEngine::applyParams() noexcept
     tp.releaseMs             = params.releaseMs;
     tp.attackWindowMs        = params.attackWindowMs;
     tp.retriggerEnabled      = params.retriggerEnabled;
+    tp.lock                  = params.pitchFollow == PitchFollow::Lock;
+    tp.lockSettleMs          = params.lockSettleMs;
+    tp.lockLeapSemitones     = params.lockLeapSemitones;
+    tp.lockLeapMs            = params.lockLeapMs;
     tracker.setParams (tp);
     tracker.setScale (params.scale, params.scaleRoot);
 
-    onsets.setParams (RetriggerDetector::riseDbForSensitivity (params.retriggerSensitivity),
+    // Lock mode: the pitch never ends a note, so re-articulations are the
+    // only note boundary and a softer one must count.
+    float sensitivity = params.retriggerSensitivity;
+    if (params.pitchFollow == PitchFollow::Lock && std::isfinite (params.lockRetriggerBoost))
+        sensitivity += std::max (0.0f, params.lockRetriggerBoost);
+    onsets.setParams (RetriggerDetector::riseDbForSensitivity (std::min (sensitivity, 1.0f)),
                       kOnsetLookbackMs, kOnsetRefractoryMs, params.onThresholdDb);
 
     auto v = params.velocity;
@@ -132,7 +141,9 @@ int MelodyEngine::windowSize() const noexcept
 int MelodyEngine::latencySamples() const noexcept
 {
     const auto ms = [this] (float v) { return v > 0.0f ? static_cast<double> (v) * 0.001 * sr : 0.0; };
-    const double stable = ms (params.minStableMs) + (params.medianFrames > 1 ? hop : 0);
+    const bool lock = params.pitchFollow == PitchFollow::Lock;
+    const double stable = ms (lock ? std::clamp (params.lockSettleMs, 5.0f, 150.0f) : params.minStableMs)
+                        + (params.medianFrames > 1 ? hop : 0);
     const double wait = std::max (stable, ms (params.attackWindowMs));
     const double detection = windowSize() * (params.detector == PitchAlgorithm::Mpm ? 0.25 : 0.5);
     return static_cast<int> (std::lround (detection + wait + hop));

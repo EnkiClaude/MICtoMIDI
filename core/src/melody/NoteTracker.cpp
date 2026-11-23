@@ -13,6 +13,11 @@ namespace
     constexpr float kStaleAttackMs = 150.0f; // an older level onset no longer counts as this note's attack
     constexpr float kOnsetLatchMs = 40.0f;   // how long an onset waits for a usable frame to retrigger
     constexpr float kRetriggerDipDb = 3.0f;  // the level must have dipped this much since the note began
+
+    // Note lock.
+    constexpr float kLockSpreadCents = 60.0f;  // settle window "stable": trimmed spread at most this
+    constexpr float kLockMaxExtraMs = 60.0f;   // ... else choose anyway this long after the window filled
+    constexpr float kLockSettleMinMs = 5.0f, kLockSettleMaxMs = 150.0f;
 }
 
 void NoteTracker::prepare (double sampleRate) noexcept
@@ -44,6 +49,12 @@ void NoteTracker::updateDerived() noexcept
     onsetLatchSamples = msToSamples (kOnsetLatchMs);
     const float cents = std::isfinite (params.changeHysteresisCents) ? params.changeHysteresisCents : 60.0f;
     hysteresisSemis = std::clamp (cents, 1.0f, 1200.0f) / 100.0f;
+
+    const float settle = std::isfinite (params.lockSettleMs) ? params.lockSettleMs : 40.0f;
+    lockSettleSamples  = msToSamples (std::clamp (settle, kLockSettleMinMs, kLockSettleMaxMs));
+    lockMaxWaitSamples = lockSettleSamples + msToSamples (kLockMaxExtraMs);
+    lockLeapSamples    = msToSamples (std::isfinite (params.lockLeapMs) ? std::clamp (params.lockLeapMs, 0.0f, 1000.0f) : 80.0f);
+    lockLeapSemis      = std::isfinite (params.lockLeapSemitones) ? std::clamp (params.lockLeapSemitones, 0.0f, 48.0f) : 0.0f;
 }
 
 void NoteTracker::reset() noexcept
@@ -61,6 +72,40 @@ void NoteTracker::reset() noexcept
     activeMaxDb = activeDipDb = kSilentDb;
     peakWrite = 0;
     peakCount = 0;
+    lockClear();
+    lockSince = 0;
+    leapSince = -1;
+    leapSide = 0;
+}
+
+void NoteTracker::lockPush (std::int64_t t, float pitch) noexcept
+{
+    lockPitches[static_cast<std::size_t> (lockWrite)] = pitch;
+    lockTimes[static_cast<std::size_t> (lockWrite)] = t;
+    lockWrite = (lockWrite + 1) % lockHistory;
+    lockCount = std::min (lockCount + 1, lockHistory);
+}
+
+float NoteTracker::lockMedian (std::int64_t since, float& spread) noexcept
+{
+    int n = 0;
+    for (int i = 0; i < lockCount; ++i)
+    {
+        const auto k = static_cast<std::size_t> (i);
+        if (lockTimes[k] > since)
+            lockSorted[static_cast<std::size_t> (n++)] = lockPitches[k];
+    }
+    if (n == 0)
+    {
+        spread = 0.0f;
+        return 0.0f;
+    }
+    std::sort (lockSorted.begin(), lockSorted.begin() + n);
+    // Trimmed spread (10 % each side): one stray frame does not count.
+    const int trim = n / 10;
+    spread = lockSorted[static_cast<std::size_t> (n - 1 - trim)] - lockSorted[static_cast<std::size_t> (trim)];
+    const auto mid = static_cast<std::size_t> (n / 2);
+    return (n % 2 == 1) ? lockSorted[mid] : 0.5f * (lockSorted[mid - 1] + lockSorted[mid]);
 }
 
 void NoteTracker::startAttack (std::int64_t t) noexcept
@@ -109,6 +154,8 @@ int NoteTracker::flush (std::int64_t time, TrackerEvent* out) noexcept
     candidate = -1;
     releaseSince = -1;
     latchedOnset = -1;
+    lockClear();
+    leapSince = -1;
     return count;
 }
 
@@ -156,6 +203,9 @@ int NoteTracker::process (const TrackerFrame& f, TrackerEvent* out) noexcept
     // on the next usable frame.
     if (st == State::Active && f.onset && activeMaxDb - activeDipDb >= kRetriggerDipDb)
         latchedOnset = t;
+
+    if (params.lock)
+        return processLock (f, usable, levelOn, levelLost, out);
 
     auto tryNoteOn = [&]
     {
@@ -281,6 +331,147 @@ int NoteTracker::process (const TrackerFrame& f, TrackerEvent* out) noexcept
                 candidate = -1;
                 noteOnTime = t;
                 activeMaxDb = activeDipDb = f.levelDb;
+            }
+            break;
+        }
+    }
+
+    return count;
+}
+
+int NoteTracker::processLock (const TrackerFrame& f, bool usable, bool levelOn, bool levelLost,
+                              TrackerEvent* out) noexcept
+{
+    const std::int64_t t = f.time;
+    int count = 0;
+
+    // Pending: wait until the pitch has settled, then choose the note once.
+    auto settle = [&]
+    {
+        if (t - lockSince < lockSettleSamples || t - attackStart < attackSamples)
+            return;
+        float spread = 0.0f;
+        const float median = lockMedian (t - lockSettleSamples, spread);
+        if (spread * 100.0f > kLockSpreadCents && t - lockSince < lockMaxWaitSamples)
+            return;
+
+        note = snapper.snap (median);
+        out[count++] = { true, note, attackPeakDb, t };
+        candidate = -1;
+        noteOnTime = t;
+        releaseSince = -1;
+        latchedOnset = -1;
+        leapSince = -1;
+        activeMaxDb = activeDipDb = f.levelDb;
+        st = State::Active;
+    };
+
+    auto beginPending = [&]
+    {
+        st = State::Pending;
+        lockClear();
+        lockSince = t;
+        lockPush (t, f.pitch);
+    };
+
+    switch (st)
+    {
+        case State::Idle:
+        {
+            if (! (usable && levelOn))
+                break;
+
+            if (attackStart < 0 || t - attackStart > msToSamples (kStaleAttackMs))
+            {
+                startAttack (t);
+                attackPeakDb = f.peakDb;
+            }
+            beginPending();
+            settle();
+            break;
+        }
+
+        case State::Pending:
+        {
+            if (! usable || levelLost)
+            {
+                st = State::Idle;
+                lockClear();
+                break;
+            }
+            lockPush (t, f.pitch);
+            settle();
+            break;
+        }
+
+        case State::Active:
+        {
+            const std::int64_t age = t - noteOnTime;
+
+            if (! usable || levelLost)
+            {
+                leapSince = -1;
+                if (releaseSince < 0)
+                    releaseSince = t;
+                if (t - releaseSince >= releaseSamples && age >= minNoteSamples)
+                {
+                    out[count++] = { false, note, kSilentDb, t };
+                    note = -1;
+                    releaseSince = -1;
+                    latchedOnset = -1;
+                    st = State::Idle;
+                }
+                break;
+            }
+            releaseSince = -1;
+            lockPush (t, f.pitch);
+
+            if (latchedOnset >= 0 && t - latchedOnset > onsetLatchSamples)
+                latchedOnset = -1;
+
+            if (latchedOnset >= 0 && params.retriggerEnabled && age >= minNoteSamples)
+            {
+                // Re-articulation: end the note now; the next one is chosen
+                // afresh from the settled pitch after this onset.
+                out[count++] = { false, note, kSilentDb, t };
+                note = -1;
+                startAttack (latchedOnset);
+                attackPeakDb = peakSince (latchedOnset);
+                latchedOnset = -1;
+                beginPending();
+                settle();
+                break;
+            }
+
+            // Big-leap escape; otherwise the pitch never changes the note.
+            if (lockLeapSemis <= 0.0f)
+                break;
+
+            const float d = f.pitch - static_cast<float> (note);
+            const int side = d > lockLeapSemis ? 1 : (d < -lockLeapSemis ? -1 : 0);
+            if (side == 0)
+            {
+                leapSince = -1;
+                break;
+            }
+            if (leapSince < 0 || side != leapSide)
+            {
+                leapSince = t;
+                leapSide = side;
+            }
+            if (t - leapSince >= lockLeapSamples && age >= minNoteSamples)
+            {
+                float spread = 0.0f;
+                const int c = snapper.snap (lockMedian (std::max (leapSince - 1, t - lockSettleSamples), spread));
+                leapSince = -1;
+                if (c != note)
+                {
+                    out[count++] = { false, note, kSilentDb, t };
+                    out[count++] = { true, c, recentPeakDb (t), t };
+                    note = c;
+                    noteOnTime = t;
+                    activeMaxDb = activeDipDb = f.levelDb;
+                }
             }
             break;
         }

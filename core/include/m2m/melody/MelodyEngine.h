@@ -19,6 +19,13 @@ namespace m2m
 
 enum class PitchAlgorithm : std::uint8_t { Yin, Mpm };
 
+/** How a held note follows the sung pitch.
+    Free: the note follows the pitch (legato changes past the hysteresis band).
+    Lock: "one note per syllable": the note is chosen once from the settled
+          pitch after each (re-)articulation and is then held whatever the
+          pitch does (see NoteTracker, "Note lock"). */
+enum class PitchFollow : std::uint8_t { Free, Lock };
+
 /** All Melody Mode parameters (PLAN.md section 4). Defaults suit a singing voice. */
 struct MelodyParams
 {
@@ -53,6 +60,13 @@ struct MelodyParams
     float attackWindowMs        = 10.0f;   // peak level window after the onset (delays note-on)
     VelocityParams velocity     {};
     bool  useFixedVelocity      = false;   // true -> velocity.fixedVelocity always
+
+    // Pitch follow (appended; Free = the behaviour before note lock existed)
+    PitchFollow pitchFollow     = PitchFollow::Free;
+    float lockSettleMs          = 40.0f;   // Lock: pitch window after the onset that chooses the note
+    float lockLeapSemitones     = 1.5f;    // Lock: a jump beyond this (0 = never) ...
+    float lockLeapMs            = 80.0f;   // ... held this long still changes the note
+    float lockRetriggerBoost    = 0.35f;   // Lock: added to retriggerSensitivity (soft re-articulations count)
 };
 
 /** Melody Mode: monophonic voice -> MIDI notes. Deterministic DSP only.
@@ -86,7 +100,9 @@ public:
     void flush (MidiEventBuffer& out, int sampleOffset = 0) noexcept override;
 
     /** Typical note-on delay for the current params (mid-range voice):
-        detection + max (minStable + one median frame, attack window) + one hop,
+        detection + max (wait + one median frame, attack window) + one hop,
+        where wait is minStableMs (Free) or lockSettleMs (Lock; a scoop or
+        unsteady start can take up to 60 ms longer),
         where detection is window/2 for YIN (it needs the tone in the oldest
         half of the window) and window/4 for MPM (its normalised
         autocorrelation is confident once ~2 periods of the tone are in the
