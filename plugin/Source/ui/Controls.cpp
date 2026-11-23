@@ -49,6 +49,17 @@ void ParamSlider::setHint (const juce::String& text, juce::Colour colour)
     }
 }
 
+void ParamSlider::setLocked (bool locked, const juce::String& why)
+{
+    if (slider.isEnabled() == locked)
+    {
+        slider.setEnabled (! locked);
+        slider.setAlpha (locked ? 0.38f : 1.0f);
+        label.setAlpha (locked ? 0.55f : 1.0f);
+    }
+    setHint (locked ? why : juce::String());
+}
+
 int ParamSlider::getPreferredHeight() const
 {
     return rowHeight + (hint.isVisible() ? 15 : 0);

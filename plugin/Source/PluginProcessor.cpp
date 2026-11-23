@@ -420,7 +420,33 @@ void MicToMidiProcessor::setStateInformation (const void* data, int sizeInBytes)
             tree.removeChild (i, nullptr);
         }
     }
+    const int version = (int) tree.getProperty (stateVersionId, 0);
     tree.removeProperty (stateVersionId, nullptr);
+
+    // Version 2 -> 3: the Stability macro (on by default) now drives the
+    // note-tracking values. A session that changed any of them keeps them:
+    // it loads in manual mode.
+    if (version < 3 && ! tree.getChildWithProperty ("id", m2m::params::id::melManual).isValid())
+    {
+        bool customised = false;
+        for (const auto* paramId : m2m::params::stabilityControlledIds)
+        {
+            const auto child = tree.getChildWithProperty ("id", paramId);
+            auto* param = state.getParameter (paramId);
+            if (child.isValid() && param != nullptr)
+            {
+                const float def = param->convertFrom0to1 (param->getDefaultValue());
+                customised |= std::abs ((float) child["value"] - def) > 1.0e-3f;
+            }
+        }
+        if (customised)
+        {
+            juce::ValueTree manual ("PARAM");
+            manual.setProperty ("id", m2m::params::id::melManual, nullptr);
+            manual.setProperty ("value", 1.0f, nullptr);
+            tree.appendChild (manual, nullptr);
+        }
+    }
 
     state.replaceState (tree);
 

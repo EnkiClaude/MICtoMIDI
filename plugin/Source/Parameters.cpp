@@ -1,5 +1,6 @@
 #include "Parameters.h"
 
+#include <m2m/melody/Stability.h>
 #include <m2m/midi/MidiEvent.h>
 
 #include <cmath>
@@ -14,6 +15,7 @@ namespace
     // Version hint for every parameter added in state version 2 (Phase 1's
     // parameters used 1). New parameters added later must use a higher hint.
     constexpr int v2 = 2;
+    constexpr int v3 = 3; // mel_follow, mel_stability, mel_manual
 
     String drumParamIdString (int slot, const char* suffix)
     {
@@ -43,9 +45,9 @@ namespace
 
     void addFloat (AudioProcessorValueTreeState::ParameterLayout& layout, const String& paramId,
                    const String& name, NormalisableRange<float> range, float def,
-                   AudioParameterFloatAttributes attributes)
+                   AudioParameterFloatAttributes attributes, int version = v2)
     {
-        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { paramId, v2 }, name, range,
+        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { paramId, version }, name, range,
                                                            clampTo (range, def), std::move (attributes)));
     }
 
@@ -58,15 +60,15 @@ namespace
     }
 
     void addBool (AudioProcessorValueTreeState::ParameterLayout& layout, const String& paramId,
-                  const String& name, bool def)
+                  const String& name, bool def, int version = v2)
     {
-        layout.add (std::make_unique<AudioParameterBool> (ParameterID { paramId, v2 }, name, def));
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { paramId, version }, name, def));
     }
 
     void addChoice (AudioProcessorValueTreeState::ParameterLayout& layout, const String& paramId,
-                    const String& name, const StringArray& choices, int def)
+                    const String& name, const StringArray& choices, int def, int version = v2)
     {
-        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { paramId, v2 }, name, choices,
+        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { paramId, version }, name, choices,
                                                             clampTo (0, choices.size() - 1, def)));
     }
 
@@ -143,6 +145,10 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
     addChoice (layout, id::melRoot, "Melody Root", rootNames(), mp.scaleRoot);
     addInt (layout, id::melTranspose, "Melody Transpose", -36, 36, mp.transpose, semitoneAttributes());
     addInt (layout, id::melChannel, "Melody MIDI Channel", 1, 16, mp.channel);
+    addChoice (layout, id::melFollow, "Melody Follow", { "Follow pitch", "Note lock" },
+               mp.pitchFollow == PitchFollow::Lock ? 1 : 0, v3);
+    addFloat (layout, id::melStability, "Melody Stability", { 0.0f, 1.0f, 0.01f }, kStabilityDefault, percent(), v3);
+    addBool (layout, id::melManual, "Melody Manual Tracking", false, v3);
 
     // --- Beatbox ------------------------------------------------------------
     addFloat (layout, id::bbSensitivity, "Beatbox Onset Sensitivity", { 0.0f, 1.0f, 0.01f }, bp.onset.sensitivity, percent());
@@ -202,6 +208,9 @@ ParamCache::ParamCache (juce::AudioProcessorValueTreeState& state)
     root        = raw (id::melRoot);
     transpose   = raw (id::melTranspose);
     melChannel  = raw (id::melChannel);
+    follow      = raw (id::melFollow);
+    stability   = raw (id::melStability);
+    manual      = raw (id::melManual);
 
     bbSens       = raw (id::bbSensitivity);
     bbMinLevel   = raw (id::bbMinLevelDb);
@@ -276,6 +285,10 @@ void ParamCache::fill (MelodyParams& m) const noexcept
     m.velocity.curve         = get (velCurve);
     m.velocity.fixedVelocity = juce::jlimit (1, 127, getInt (velFixedValue));
     m.useFixedVelocity       = getBool (velFixed);
+
+    m.pitchFollow = getInt (follow) == 1 ? PitchFollow::Lock : PitchFollow::Free;
+    if (! getBool (manual))
+        m = applyStability (m, get (stability)); // the macro drives hysteresis, min stable, min note, ...
 }
 
 void ParamCache::fill (BeatboxParams& b) const noexcept

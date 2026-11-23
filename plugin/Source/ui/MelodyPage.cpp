@@ -2,6 +2,7 @@
 
 #include "../Parameters.h"
 
+#include <m2m/melody/Stability.h>
 #include <m2m/midi/MidiEvent.h>
 
 #include <cmath>
@@ -307,13 +308,114 @@ void PitchTrace::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-MelodyPage::MelodyPage (APVTS& s) : state (s)
+SteadinessPanel::SteadinessPanel (APVTS& state)
+{
+    using namespace m2m::params;
+
+    followLabel.setText ("Follow", juce::dontSendNotification);
+    stabilityLabel.setText ("Stability", juce::dontSendNotification);
+    looseLabel.setText ("Loose", juce::dontSendNotification);
+    tightLabel.setText ("Tight", juce::dontSendNotification);
+    for (auto* l : { &followLabel, &stabilityLabel })
+        styleLabel (*l, 13.0f, colours::text);
+    styleLabel (looseLabel, 11.5f, colours::textDim, juce::Justification::centredRight);
+    styleLabel (tightLabel, 11.5f, colours::textDim);
+    styleLabel (info, 11.5f, colours::textDim, juce::Justification::centredRight);
+    for (auto* l : { &followLabel, &stabilityLabel, &looseLabel, &tightLabel, &info })
+        addAndMakeVisible (*l);
+
+    lockButton.setButtonText (juce::String::fromUTF8 ("Note lock \xe2\x80\x94 one note per syllable"));
+    followButton.setTooltip ("The note follows your pitch: sliding to another note changes the note.");
+    lockButton.setTooltip ("Each sung syllable gives ONE note, chosen once the pitch has settled. "
+                           "Wavering pitch never changes it. Re-articulate (\"da-da-da\") for a new note; "
+                           "a jump of more than a whole tone also changes it.");
+    for (auto* b : { &followButton, &lockButton })
+    {
+        b->setClickingTogglesState (false);
+        b->setColour (juce::TextButton::buttonOnColourId, colours::melody);
+        addAndMakeVisible (*b);
+    }
+    followButton.setConnectedEdges (juce::Button::ConnectedOnRight);
+    lockButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
+
+    if (auto* p = state.getParameter (id::melFollow))
+    {
+        followAttachment = std::make_unique<juce::ParameterAttachment> (
+            *p, [this] (float v) { showFollow (juce::roundToInt (v)); }, state.undoManager);
+        followAttachment->sendInitialUpdate();
+    }
+    followButton.onClick = [this] { if (followAttachment) followAttachment->setValueAsCompleteGesture (0.0f); };
+    lockButton.onClick = [this] { if (followAttachment) followAttachment->setValueAsCompleteGesture (1.0f); };
+
+    stability.setColour (juce::Slider::trackColourId, colours::melody);
+    stability.setTooltip ("One control for how steady notes are. Tight: wavering pitch is ignored more, "
+                          "at the cost of a little more latency. Loose: notes follow quickly.");
+    stability.setVelocityBasedMode (false);
+    addAndMakeVisible (stability);
+    stabilityAttachment = std::make_unique<APVTS::SliderAttachment> (state, id::melStability, stability);
+    if (auto* p = state.getParameter (id::melStability))
+        stability.setDoubleClickReturnValue (true, (double) p->convertFrom0to1 (p->getDefaultValue()));
+}
+
+void SteadinessPanel::showFollow (int index)
+{
+    followButton.setToggleState (index == 0, juce::dontSendNotification);
+    lockButton.setToggleState (index == 1, juce::dontSendNotification);
+}
+
+void SteadinessPanel::update (bool manual, float amount, double latencyMs)
+{
+    stability.setEnabled (! manual);
+    stability.setAlpha (manual ? 0.38f : 1.0f);
+    for (auto* l : { &stabilityLabel, &looseLabel, &tightLabel })
+        l->setAlpha (manual ? 0.55f : 1.0f);
+    const auto text = (manual ? juce::String ("Manual (Advanced)")
+                              : juce::String (juce::roundToInt (amount * 100.0f)) + " %")
+                      + juce::String::fromUTF8 (" \xc2\xb7 latency ") + juce::String (latencyMs, 1) + " ms";
+    if (info.getText() != text)
+        info.setText (text, juce::dontSendNotification);
+}
+
+void SteadinessPanel::paint (juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (colours::panel);
+    g.fillRoundedRectangle (b, 6.0f);
+    g.setColour (colours::outline.withAlpha (0.6f));
+    g.drawRoundedRectangle (b, 6.0f, 1.0f);
+    g.setColour (colours::melody);
+    g.fillRoundedRectangle (8.0f, 14.0f, 3.0f, 10.0f, 1.5f);
+}
+
+void SteadinessPanel::resized()
+{
+    auto r = getLocalBounds().reduced (8, 8).withTrimmedLeft (8);
+    const int labelW = 64;
+
+    auto row1 = r.removeFromTop (24);
+    followLabel.setBounds (row1.removeFromLeft (labelW));
+    const int followW = juce::roundToInt ((float) row1.getWidth() * 0.36f);
+    followButton.setBounds (row1.removeFromLeft (followW));
+    lockButton.setBounds (row1);
+
+    r.removeFromTop (6);
+    auto row2 = r.removeFromTop (24);
+    stabilityLabel.setBounds (row2.removeFromLeft (labelW));
+    info.setBounds (row2.removeFromRight (juce::jlimit (120, 190, row2.getWidth() / 3)));
+    looseLabel.setBounds (row2.removeFromLeft (40));
+    tightLabel.setBounds (row2.removeFromRight (38));
+    stability.setBounds (row2.reduced (6, 0));
+}
+
+//==============================================================================
+MelodyPage::MelodyPage (APVTS& s) : state (s), steadiness (s)
 {
     using namespace m2m::params;
     const auto accent = colours::melody;
 
     addAndMakeVisible (display);
     addAndMakeVisible (trace);
+    addAndMakeVisible (steadiness);
 
     detection.add<ParamCombo> (state, id::melDetector, "Detector",
                                "YIN: robust default. MPM: can track fast changes better.");
@@ -326,7 +428,7 @@ MelodyPage::MelodyPage (APVTS& s) : state (s)
 
     notes.add<ParamSlider> (state, id::melOnDb, "On level", accent, "Input level needed to start a note");
     notes.add<ParamSlider> (state, id::melOffDb, "Off level", accent, "Level below which a note ends");
-    notes.add<ParamSlider> (state, id::melMinNoteMs, "Min note", accent, "Shortest note that is sent");
+    minNote = &notes.add<ParamSlider> (state, id::melMinNoteMs, "Min note", accent, "Shortest note that is sent");
     notes.add<ParamToggle> (state, id::melRetrigger, "Retrigger on re-attack", accent,
                             "Start a new note when you re-attack the same pitch");
 
@@ -341,9 +443,12 @@ MelodyPage::MelodyPage (APVTS& s) : state (s)
     velocity.add<ParamSlider> (state, id::velFixedValue, "Fixed value", accent);
     velocity.add<ParamSlider> (state, id::melChannel, "Channel", accent, "MIDI channel for melody notes");
 
-    advanced.add<ParamSlider> (state, id::melHysteresis, "Hysteresis", accent,
+    advanced.add<ParamToggle> (state, id::melManual, "Manual: use these, not Stability", accent,
+                               "Off: the Stability control sets Hysteresis, Min stable and Min note (greyed out here). "
+                               "On: these sliders are used and Stability is ignored.");
+    hysteresis = &advanced.add<ParamSlider> (state, id::melHysteresis, "Hysteresis", accent,
                                "How far the pitch must move (cents) before the note changes. Higher = steadier through vibrato.");
-    advanced.add<ParamSlider> (state, id::melMinStableMs, "Min stable", accent,
+    minStable = &advanced.add<ParamSlider> (state, id::melMinStableMs, "Min stable", accent,
                                "Pitch must hold this long before a note starts or changes (adds latency)");
     advanced.add<ParamSlider> (state, id::melReleaseMs, "Release", accent,
                                "How long silence must last before a note ends");
@@ -372,6 +477,17 @@ void MelodyPage::update (const NoteDisplay::State& s, double latencyMs, double s
     trace.setSampleRate (sampleRate);
     trace.tick();
     minHz->setHint ("Lower = more latency (now " + juce::String (latencyMs, 1) + " ms)");
+
+    using namespace m2m::params;
+    const bool manual = state.getRawParameterValue (id::melManual)->load() >= 0.5f;
+    const float amount = state.getRawParameterValue (id::melStability)->load();
+    steadiness.update (manual, amount, latencyMs);
+
+    // While the macro drives them, the sliders show the macro's values.
+    const auto m = m2m::applyStability ({}, amount);
+    hysteresis->setLocked (! manual, "Stability sets " + juce::String (juce::roundToInt (m.changeHysteresisCents)) + " ct");
+    minStable->setLocked (! manual, "Stability sets " + juce::String (m.minStableMs, 1) + " ms");
+    minNote->setLocked (! manual, "Stability sets " + juce::String (juce::roundToInt (m.minNoteMs)) + " ms");
 }
 
 void MelodyPage::paint (juce::Graphics&) {}
@@ -395,18 +511,21 @@ void MelodyPage::resized()
         controls.removeFromLeft (gap);
     }
 
-    // Top: readout on the left, trace on the right.
+    // Top: readout on the left; Steady notes panel above the trace on the right.
     auto top = r;
     display.setBounds (top.removeFromLeft (juce::jlimit (220, 300, top.getWidth() / 3)));
     top.removeFromLeft (10);
+    steadiness.setBounds (top.removeFromTop (SteadinessPanel::preferredHeight));
+    top.removeFromTop (8);
     trace.setBounds (top);
 
     // Advanced button in the trace's top-right corner; its panel floats
-    // over the right part of the trace.
+    // below it (over the trace and, if needed, the controls).
     advancedButton.setBounds (top.getRight() - 96, top.getY() + 6, 90, 22);
-    const int advW = juce::jmin (300, top.getWidth());
-    auto adv = top.withTrimmedTop (34).withLeft (top.getRight() - advW);
-    advanced.setBounds (adv.withHeight (juce::jmin (adv.getHeight(), advanced.getPreferredHeight())));
+    const int advW = juce::jmin (320, top.getWidth());
+    const int advY = top.getY() + 34;
+    const int advH = juce::jmin (advanced.getPreferredHeight(), getHeight() - 6 - advY);
+    advanced.setBounds (top.getRight() - advW, advY, advW, advH);
 }
 
 } // namespace m2m::ui

@@ -41,6 +41,10 @@ namespace m2m::params
         inline constexpr const char* melRoot        = "mel_root";
         inline constexpr const char* melTranspose   = "mel_transpose";
         inline constexpr const char* melChannel     = "mel_channel";
+        // State version 3: note lock + Stability macro.
+        inline constexpr const char* melFollow      = "mel_follow";     // Follow pitch / Note lock
+        inline constexpr const char* melStability   = "mel_stability";  // 0..1, Loose .. Tight
+        inline constexpr const char* melManual      = "mel_manual";     // Advanced sliders instead of the macro
 
         // Beatbox (per-class IDs: see drumParamId())
         inline constexpr const char* bbSensitivity  = "bb_sensitivity";
@@ -54,7 +58,14 @@ namespace m2m::params
 
     // Bump when the saved state changes in a way that needs migration.
     // 1: Phase 1 level trigger. 2: Melody/Beatbox modes + calibration.
-    inline constexpr int stateVersion = 2;
+    // 3: mel_follow, mel_stability, mel_manual. A version-2 session whose
+    //    macro-controlled values (hysteresis, min stable, min note) differ
+    //    from the defaults loads with mel_manual on, so it sounds the same.
+    inline constexpr int stateVersion = 3;
+
+    /** IDs of the parameters the Stability macro overrides unless mel_manual is on. */
+    inline constexpr std::array<const char*, 3> stabilityControlledIds { id::melHysteresis, id::melMinStableMs,
+                                                                           id::melMinNoteMs };
 
     enum class Mode : int { Melody = 0, Beatbox = 1 };
 
@@ -134,6 +145,9 @@ namespace m2m::params
         std::atomic<float>* root = nullptr;
         std::atomic<float>* transpose = nullptr;
         std::atomic<float>* melChannel = nullptr;
+        std::atomic<float>* follow = nullptr;
+        std::atomic<float>* stability = nullptr;
+        std::atomic<float>* manual = nullptr;
 
         std::atomic<float>* bbSens = nullptr;
         std::atomic<float>* bbMinLevel = nullptr;

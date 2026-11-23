@@ -9,6 +9,8 @@
 #include "Parameters.h"
 #include "Signals.h"
 
+#include <m2m/melody/Stability.h>
+
 #include <iostream>
 
 namespace
@@ -116,6 +118,37 @@ int main (int argc, char** argv)
         ok &= migrated;
     }
 
+    // A version-2 session (before the Stability macro): customised tracking
+    // values load in manual mode so they keep working; untouched ones load
+    // with the macro on.
+    for (const bool customised : { true, false })
+    {
+        juce::XmlElement old ("MICtoMIDI");
+        old.setAttribute ("stateVersion", 2);
+        auto* e = old.createNewChildElement ("PARAM");
+        e->setAttribute ("id", m2m::params::id::melHysteresis);
+        e->setAttribute ("value", customised ? 110.0 : 60.0);
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (old, block);
+        p.setStateInformation (block.getData(), (int) block.getSize());
+        const bool manual = p.getState().getRawParameterValue (m2m::params::id::melManual)->load() >= 0.5f;
+        const float hyst = p.getState().getRawParameterValue (m2m::params::id::melHysteresis)->load();
+        const float stab = p.getState().getRawParameterValue (m2m::params::id::melStability)->load();
+        const bool okMigration = manual == customised && std::abs (hyst - (customised ? 110.0f : 60.0f)) < 0.01f
+                                 && std::abs (stab - m2m::kStabilityDefault) < 1.0e-4f;
+        std::cout << (okMigration ? "PASS" : "FAIL") << " version-2 state ("
+                  << (customised ? "customised" : "default") << " hysteresis) loads with manual "
+                  << (manual ? "on" : "off") << "\n";
+        ok &= okMigration;
+    }
+    {
+        juce::XmlElement fresh ("MICtoMIDI");
+        fresh.setAttribute ("stateVersion", m2m::params::stateVersion);
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (fresh, block);
+        p.setStateInformation (block.getData(), (int) block.getSize()); // back to defaults
+    }
+
     // --- Melody: a short sung phrase ------------------------------------------
     {
         using namespace m2m::smoke;
@@ -133,6 +166,19 @@ int main (int argc, char** argv)
         ok &= snapshot (p, s, dir.getChildFile ("melody.png"), w, h);
         ok &= snapshot (p, s, dir.getChildFile ("melody-min.png"), MicToMidiEditor::minWidth, MicToMidiEditor::minHeight);
         ok &= snapshot (p, s, dir.getChildFile ("melody-advanced.png"), w, h, "Advanced");
+        ok &= snapshot (p, s, dir.getChildFile ("melody-advanced-min.png"), MicToMidiEditor::minWidth,
+                        MicToMidiEditor::minHeight, "Advanced");
+
+        // Note lock with a tight Stability; then manual mode.
+        setParam (p, m2m::params::id::melFollow, 1.0f);
+        setParam (p, m2m::params::id::melStability, 0.8f);
+        ok &= snapshot (p, s, dir.getChildFile ("melody-lock.png"), w, h);
+        ok &= snapshot (p, s, dir.getChildFile ("melody-lock-min.png"), MicToMidiEditor::minWidth, MicToMidiEditor::minHeight);
+        setParam (p, m2m::params::id::melManual, 1.0f);
+        ok &= snapshot (p, s, dir.getChildFile ("melody-manual-advanced.png"), w, h, "Advanced");
+        setParam (p, m2m::params::id::melManual, 0.0f);
+        setParam (p, m2m::params::id::melFollow, 0.0f);
+        setParam (p, m2m::params::id::melStability, m2m::kStabilityDefault);
     }
 
     // --- Beatbox: calibrate a few kicks, then a groove ------------------------

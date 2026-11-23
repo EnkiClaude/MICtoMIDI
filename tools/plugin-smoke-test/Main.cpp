@@ -5,7 +5,10 @@
 //   - Beatbox mode: kick-like burst -> 36, hat-like burst -> 42, channel 10
 //   - switching mode while a note is held sends its note-off
 //   - reported latency is > 0 and follows the mode
-//   - state save/restore round-trips the mode and a few parameters
+//   - Note lock: a 220 Hz tone wandering +-80 cents gives exactly one A3
+//     (Follow pitch gives several notes on the same tone)
+//   - state save/restore round-trips the mode and a few parameters,
+//     including Melody Follow / Stability / Manual Tracking
 // All signals are synthetic and deterministic.
 //
 // Usage: m2m_plugin_smoke_test <path/to/MICtoMIDI.vst3>
@@ -197,7 +200,8 @@ int main (int argc, char** argv)
     check (plugin->setBusesLayout (layout), "both input buses can be enabled");
 
     Host host (*plugin);
-    for (auto* name : { "Mode", "Melody Min Freq", "Beatbox Kick Note", "Beatbox MIDI Channel", "Melody MIDI Channel" })
+    for (auto* name : { "Mode", "Melody Min Freq", "Beatbox Kick Note", "Beatbox MIDI Channel", "Melody MIDI Channel",
+                        "Melody Follow", "Melody Stability", "Melody Manual Tracking" })
         check (host.param (name) != nullptr, juce::String ("parameter \"") + name + "\" exposed to host");
     if (failures > 0)
         return 1;
@@ -229,6 +233,26 @@ int main (int argc, char** argv)
         silence (s, sampleRate, 0.5);
         const auto n = host.run (s, sidechain);
         check (isSequence (n, { 57, 64 }, 1), "220 Hz then 330 Hz on sidechain -> 57 then 64 (got " + describe (n) + ")");
+    }
+
+    // ---- Note lock: a wandering held note is one note ------------------------------
+    {
+        std::vector<float> s;
+        silence (s, sampleRate, 0.3);
+        wanderingTone (s, sampleRate, 220.0, 2.5, 80.0);
+        silence (s, sampleRate, 0.5);
+
+        const auto freeNotes = host.run (s, sidechain);
+        check (freeNotes.size() > 2, "Follow pitch: 220 Hz wandering +-80 ct gives several notes (got "
+                                         + describe (freeNotes) + ")");
+
+        host.set ("Melody Follow", 1.0f); // Note lock
+        host.silence (0.1);
+        const auto lockNotes = host.run (s, sidechain);
+        check (isSequence (lockNotes, { 57 }, 1), "Note lock: 220 Hz wandering +-80 ct -> exactly one A3 (got "
+                                                      + describe (lockNotes) + ")");
+        host.set ("Melody Follow", 0.0f);
+        host.silence (0.1);
     }
 
     // ---- Mode switch while a note is held ----------------------------------------
@@ -283,17 +307,23 @@ int main (int argc, char** argv)
         auto* minHz = host.param ("Melody Min Freq");
         auto* kickNote = host.param ("Beatbox Kick Note");
         auto* channel = host.param ("Melody MIDI Channel");
+        auto* follow = host.param ("Melody Follow");
+        auto* stability = host.param ("Melody Stability");
+        auto* manual = host.param ("Melody Manual Tracking");
 
         mode->setValueNotifyingHost (1.0f);
         minHz->setValueNotifyingHost (0.3f);
         kickNote->setValueNotifyingHost (40.0f / 127.0f);
         channel->setValueNotifyingHost (4.0f / 15.0f);
+        follow->setValueNotifyingHost (1.0f);
+        stability->setValueNotifyingHost (0.73f);
+        manual->setValueNotifyingHost (1.0f);
         host.silence (0.05);
         // Compare as text: the plugin snaps values to its parameter steps.
         const auto snapshot = [&]
         {
             juce::StringArray s;
-            for (auto* p : { mode, minHz, kickNote, channel })
+            for (auto* p : { mode, minHz, kickNote, channel, follow, stability, manual })
                 s.add (p->getCurrentValueAsText());
             return s.joinIntoString (", ");
         };
@@ -306,6 +336,9 @@ int main (int argc, char** argv)
         minHz->setValueNotifyingHost (0.9f);
         kickNote->setValueNotifyingHost (0.0f);
         channel->setValueNotifyingHost (0.0f);
+        follow->setValueNotifyingHost (0.0f);
+        stability->setValueNotifyingHost (0.1f);
+        manual->setValueNotifyingHost (0.0f);
         host.silence (0.05);
 
         plugin->setStateInformation (state.getData(), (int) state.getSize());
@@ -313,7 +346,8 @@ int main (int argc, char** argv)
 
         const auto restored = snapshot();
         check (restored == saved && saved.startsWith ("Beatbox"),
-               "state save/restore round-trips Mode, Melody Min Freq, Beatbox Kick Note, Melody MIDI Channel ("
+               "state save/restore round-trips Mode, Melody Min Freq, Beatbox Kick Note, Melody MIDI Channel, "
+                   "Melody Follow, Melody Stability, Melody Manual Tracking ("
                    + saved + " -> " + restored + ")");
     }
 

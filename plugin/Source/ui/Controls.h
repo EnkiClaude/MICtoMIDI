@@ -30,6 +30,10 @@ public:
                  juce::Colour accent, const juce::String& tooltip = {});
 
     void setHint (const juce::String& text, juce::Colour colour = colours::textFaint);
+
+    /** Greys the control out (no editing) while something else, e.g. the
+        Stability macro, sets the value; `why` is shown as the hint. */
+    void setLocked (bool locked, const juce::String& why = {});
     int getPreferredHeight() const override;
     void resized() override;
 

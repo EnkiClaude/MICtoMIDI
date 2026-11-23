@@ -44,6 +44,33 @@ inline void harmonicTone (std::vector<float>& out, double sr, double hz, double 
     }
 }
 
+/** Voice-like tone whose pitch wanders slowly by +-wanderCents (0.8 Hz,
+    starting on pitch) plus a little 7 Hz jitter: an unsteady held note. */
+inline void wanderingTone (std::vector<float>& out, double sr, double hz, double seconds,
+                           double wanderCents, float amplitude = 0.3f)
+{
+    const auto n = (size_t) std::lround (seconds * sr);
+    const auto fade = (size_t) std::lround (0.01 * sr);
+    double phase = 0.0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double t = (double) i / sr;
+        const double cents = wanderCents * std::sin (twoPi * 0.8 * t) + 12.0 * std::sin (twoPi * 7.0 * t);
+        const double f = hz * std::pow (2.0, cents / 1200.0);
+        double x = 0.0;
+        for (int k = 1; k <= 5; ++k)
+            x += std::sin (twoPi * phase * k) / k;
+        phase += f / sr;
+        phase -= std::floor (phase);
+        double env = 1.0;
+        if (i < fade)
+            env = (double) i / (double) fade;
+        else if (n - i < fade)
+            env = (double) (n - i) / (double) fade;
+        out.push_back ((float) (amplitude * 0.6 * x * env));
+    }
+}
+
 /** Small deterministic noise source (xorshift). */
 struct Noise
 {

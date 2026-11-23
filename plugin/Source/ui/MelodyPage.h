@@ -54,6 +54,32 @@ private:
     float lo = 50.0f, hi = 74.0f;
 };
 
+/** "Steady notes": the Follow switch (Follow pitch / Note lock) and the
+    Stability macro (Loose .. Tight) with its latency. */
+class SteadinessPanel final : public juce::Component
+{
+public:
+    explicit SteadinessPanel (APVTS& state);
+
+    /** manual: mel_manual is on (the macro is not used). */
+    void update (bool manual, float stabilityAmount, double latencyMs);
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    static constexpr int preferredHeight = 70;
+
+private:
+    void showFollow (int index);
+
+    juce::Label followLabel, stabilityLabel, looseLabel, tightLabel, info;
+    juce::TextButton followButton { "Follow pitch" };
+    juce::TextButton lockButton;
+    std::unique_ptr<juce::ParameterAttachment> followAttachment;
+    juce::Slider stability { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
+    std::unique_ptr<APVTS::SliderAttachment> stabilityAttachment;
+};
+
 /** Melody mode: readout + trace on top, grouped controls below. */
 class MelodyPage final : public juce::Component
 {
@@ -70,6 +96,7 @@ private:
     APVTS& state;
     NoteDisplay display;
     PitchTrace trace;
+    SteadinessPanel steadiness;
 
     ControlGroup detection { "Detection", colours::melody };
     ControlGroup notes { "Notes", colours::melody };
@@ -77,6 +104,9 @@ private:
     ControlGroup velocity { "Velocity & MIDI", colours::melody };
     ControlGroup advanced { "Advanced", colours::melody };
     ParamSlider* minHz = nullptr;
+    ParamSlider* minNote = nullptr;
+    ParamSlider* hysteresis = nullptr;
+    ParamSlider* minStable = nullptr;
 
     juce::TextButton advancedButton { "Advanced" };
 };
