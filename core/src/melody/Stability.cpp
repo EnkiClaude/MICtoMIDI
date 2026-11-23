@@ -15,9 +15,9 @@ namespace
 
     // Keep in sync with the table in Stability.h. The middle anchor must
     // equal the MelodyParams defaults (checked by the unit tests).
-    constexpr Anchor kLoose   { 45.0f,  8.0f, 1.0f,  0.0f, 30.0f, 30.0f };
-    constexpr Anchor kDefault { 60.0f, 10.0f, 3.0f,  0.0f, 40.0f, 40.0f };
-    constexpr Anchor kTight   { 100.0f, 40.0f, 7.0f, 10.0f, 60.0f, 60.0f };
+    constexpr Anchor kLoose   { 45.0f,  8.0f, 1.0f,  0.0f, 30.0f, 10.0f };
+    constexpr Anchor kDefault { 60.0f, 10.0f, 3.0f,  0.0f, 40.0f, 15.0f };
+    constexpr Anchor kTight   { 90.0f, 20.0f, 5.0f, 0.0f, 60.0f, 30.0f };
 
     float lerp (float a, float b, float x) noexcept { return a + (b - a) * x; }
 }

@@ -116,6 +116,12 @@ namespace
         // Shortest decimal form that reads back to exactly the same double.
         // (std::to_chars for floating point is unavailable before macOS 13.3,
         // and we target macOS 11.) Locale-independent.
+        // Integral values print as integers (precision 1 would give "5e+01").
+        if (std::abs (v) < 1.0e15 && v == std::floor (v))
+        {
+            out += std::to_string (static_cast<long long> (v));
+            return;
+        }
         std::string text;
         for (int precision = 1; precision <= 17; ++precision)
         {

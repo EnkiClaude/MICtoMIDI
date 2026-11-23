@@ -43,9 +43,9 @@ struct NoteTrackerParams
 
     // Note lock ("one note per syllable"); see the class comment.
     bool  lock                  = false;
-    float lockSettleMs          = 40.0f;   // pitch window that chooses a locked note
-    float lockLeapSemitones     = 0.0f;    // big-leap escape: jump > this (0 = off) ...
-    float lockLeapMs            = 80.0f;   // ... held this long changes the locked note
+    float lockSettleMs          = 15.0f;   // pitch window that chooses a locked note
+    float lockLeapSemitones     = 1.2f;    // big-leap escape: jump > this (0 = off) ...
+    float lockLeapMs            = 20.0f;   // ... held this long changes the locked note
 };
 
 /** Monophonic note state machine (PLAN.md section 4): Idle -> Pending -> Active.
@@ -69,18 +69,23 @@ struct NoteTrackerParams
 
     Note lock (params.lock): the pitch only chooses the note at its start.
     - Pending -> Active: the note is chosen from the pitch AFTER it settles:
-      once the last lockSettleMs of frames (since Pending began) spread over
-      at most kLockSpreadCents, or at the latest lockSettleMs +
-      kLockMaxExtraMs after Pending began, the note is the snapped median of
-      those frames. A scoop into the note keeps the spread wide, so it does
-      not choose the note. The attack window applies as usual.
+      once the last lockSettleMs of frames (since Pending began) are
+      settled - trimmed spread <= 60 cents AND least-squares slope <= 4.5
+      semitones/s - the note is the snapped median of that window. A scoop
+      or fall into the note moves faster than that, so it does not choose
+      the note; it delays the note-on until the pitch arrives. If the pitch
+      never settles (wide vibrato), the note is chosen 60 ms after the window
+      filled, from the median since the onset. The attack window applies.
     - Active: pitch movement never changes the note (no legato change).
       The note ends on release (as above) or on a retrigger (amplitude
       re-onset), which starts a new note chosen afresh by the same rule.
     - Big-leap escape (lockLeapSemitones > 0): a pitch further than
-      lockLeapSemitones from the note, on the same side, for lockLeapMs ->
-      Note Off(old) + Note On(snapped median of the last lockSettleMs) at the
-      same time, so wide legato intervals still come through.
+      lockLeapSemitones from where the note is sung (a 100 ms one-pole
+      average of its pitch, so vibrato and wander never count), on the same side, for lockLeapMs
+      (level above the on-threshold) and then settled by the same rule ->
+      Note Off(old) + Note On(new) at the same time, so wider legato
+      intervals still come through without a re-articulation. Smaller pitch
+      movement (wander, vibrato, semitone steps) never changes the note.
 
     Invariants: at most one note sounding; every On is followed by an Off
     (flush() ends a held note); event times never decrease. Real-time safe. */
@@ -122,7 +127,7 @@ private:
     void lockClear() noexcept { lockCount = 0; lockWrite = 0; }
     void lockPush (std::int64_t t, float pitch) noexcept;
     /** Median of the frames newer than `since`; spread = max - min (semitones). */
-    float lockMedian (std::int64_t since, float& spread) noexcept;
+    float lockMedian (std::int64_t since, float& spread, float& slope) noexcept;
     int processLock (const TrackerFrame& f, bool usable, bool levelOn, bool levelLost, TrackerEvent* out) noexcept;
 
     NoteTrackerParams params;
@@ -155,6 +160,9 @@ private:
     int lockWrite = 0, lockCount = 0;
     std::int64_t lockSince = 0;       // Pending: when the settle window began
     std::int64_t leapSince = -1;      // Active: when the pitch left the leap band
+    float lockCentre = 0.0f;          // Active: slow average of the held note's pitch (leap reference)
+    std::int64_t lockCentreTime = 0;
+    std::int64_t centrePausedSince = -1;
     int leapSide = 0;                 // +1 above, -1 below
     std::int64_t lockSettleSamples = 0, lockMaxWaitSamples = 0, lockLeapSamples = 0;
     float lockLeapSemis = 0.0f;

@@ -178,6 +178,33 @@
       "maxMeanAbsOnsetErrorMs": 22.201388888888985,
       "maxFalseTriggersPerMinute": 0.5
     },
+    "unsteady_melody_detached": {
+      "f1": 0.5714285714285714,
+      "meanAbsOnsetErrorMs": 26.090332575934298,
+      "falseTriggersPerMinute": 41.08815120439643,
+      "minF1": 0.5514285714285714,
+      "maxMeanAbsOnsetErrorMs": 28.090332575934298,
+      "maxFalseTriggersPerMinute": 42.08815120439643,
+      "knownLimitation": "Free mode: pitch wander causes extra note changes and scoops start a wrong short note; soft (9-15 dB) re-articulations on repeated pitches are partly missed at retriggerSensitivity 0.5. See melody_lock.json. Gates = measured -/+ tolerance."
+    },
+    "unsteady_melody_legato": {
+      "f1": 0.4090909090909091,
+      "meanAbsOnsetErrorMs": 38.997093094210726,
+      "falseTriggersPerMinute": 135.87589529771506,
+      "minF1": 0.3890909090909091,
+      "maxMeanAbsOnsetErrorMs": 40.997093094210726,
+      "maxFalseTriggersPerMinute": 136.87589529771506,
+      "knownLimitation": "Free mode: pitch wander past the hysteresis gives extra notes between legato steps; truth onsets are mid-portamento. Gates = measured -/+ tolerance."
+    },
+    "unsteady_sustained": {
+      "f1": 0.3846153846153846,
+      "meanAbsOnsetErrorMs": 20.379166666666627,
+      "falseTriggersPerMinute": 80.38277511961724,
+      "minF1": 0.36461538461538456,
+      "maxMeanAbsOnsetErrorMs": 22.379166666666627,
+      "maxFalseTriggersPerMinute": 81.38277511961724,
+      "knownLimitation": "Untrained-singer pitch wander (+-50-80 ct + jitter + vibrato) crosses the 60 ct hysteresis in Free mode and produces note changes; Note lock (melody_lock.json) and a higher Stability are the remedies. Gates = measured -/+ tolerance."
+    },
     "vibrato": {
       "f1": 1,
       "meanAbsOnsetErrorMs": 17.97916666666671,

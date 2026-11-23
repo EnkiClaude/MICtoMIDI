@@ -30,6 +30,8 @@ jobs:
       #   m2m-cli eval --mode melody --baseline tests/baselines/melody.json --write-baseline tests/baselines/melody.json
       - name: Melody regression gate
         run: build/tools/m2m-cli/m2m-cli eval --mode melody --scenarios all-melody --baseline tests/baselines/melody.json --report build/m2m-eval-melody.json
+      - name: Melody regression gate (Note lock)
+        run: build/tools/m2m-cli/m2m-cli eval --mode melody --scenarios all-melody --set follow=lock --tolerance-ms 100 --baseline tests/baselines/melody_lock.json --report build/m2m-eval-melody-lock.json
       - name: Beatbox regression gate
         run: build/tools/m2m-cli/m2m-cli eval --mode beatbox --scenarios all-beatbox --baseline tests/baselines/beatbox.json --report build/m2m-eval-beatbox.json
       - uses: actions/upload-artifact@v4

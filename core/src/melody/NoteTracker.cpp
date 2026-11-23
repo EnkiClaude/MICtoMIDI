@@ -15,8 +15,14 @@ namespace
     constexpr float kRetriggerDipDb = 3.0f;  // the level must have dipped this much since the note began
 
     // Note lock.
-    constexpr float kLockSpreadCents = 60.0f;  // settle window "stable": trimmed spread at most this
-    constexpr float kLockMaxExtraMs = 60.0f;   // ... else choose anyway this long after the window filled
+    // The settle window counts as "settled" when its trimmed spread is at most
+    // kLockSpreadCents AND its least-squares slope at most kLockMaxSlope.
+    // The slope test is what keeps scoops from choosing the note: a scoop
+    // moves 10-25 semitones/s, an unsteady singer's slow wander < 4.
+    constexpr float kLockSpreadCents = 60.0f;
+    constexpr float kLockMaxSlope = 4.5f;      // semitones per second
+    constexpr double kLockCentreSeconds = 0.1;  // big-leap reference: one-pole average of the held pitch
+    constexpr float kLockMaxExtraMs = 60.0f;   // not settled: choose anyway this long after the window filled
     constexpr float kLockSettleMinMs = 5.0f, kLockSettleMaxMs = 150.0f;
 }
 
@@ -86,20 +92,32 @@ void NoteTracker::lockPush (std::int64_t t, float pitch) noexcept
     lockCount = std::min (lockCount + 1, lockHistory);
 }
 
-float NoteTracker::lockMedian (std::int64_t since, float& spread) noexcept
+float NoteTracker::lockMedian (std::int64_t since, float& spread, float& slope) noexcept
 {
     int n = 0;
+    double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
     for (int i = 0; i < lockCount; ++i)
     {
         const auto k = static_cast<std::size_t> (i);
         if (lockTimes[k] > since)
+        {
+            const double tt = static_cast<double> (lockTimes[k] - since) / sr;
+            const double pp = static_cast<double> (lockPitches[k]);
+            sx += tt; sy += pp; sxx += tt * tt; sxy += tt * pp;
             lockSorted[static_cast<std::size_t> (n++)] = lockPitches[k];
+        }
     }
+    slope = 0.0f;
     if (n == 0)
     {
         spread = 0.0f;
         return 0.0f;
     }
+    // Least-squares slope (semitones per second).
+    const double dn = static_cast<double> (n);
+    const double den = dn * sxx - sx * sx;
+    if (n >= 3 && den > 0.0)
+        slope = static_cast<float> ((dn * sxy - sx * sy) / den);
     std::sort (lockSorted.begin(), lockSorted.begin() + n);
     // Trimmed spread (10 % each side): one stray frame does not count.
     const int trim = n / 10;
@@ -350,12 +368,23 @@ int NoteTracker::processLock (const TrackerFrame& f, bool usable, bool levelOn, 
     {
         if (t - lockSince < lockSettleSamples || t - attackStart < attackSamples)
             return;
-        float spread = 0.0f;
-        const float median = lockMedian (t - lockSettleSamples, spread);
-        if (spread * 100.0f > kLockSpreadCents && t - lockSince < lockMaxWaitSamples)
-            return;
+        float spread = 0.0f, slope = 0.0f;
+        float median = lockMedian (t - lockSettleSamples, spread, slope);
+        const bool settled = spread * 100.0f <= kLockSpreadCents && std::abs (slope) <= kLockMaxSlope;
+        if (! settled)
+        {
+            if (t - lockSince < lockMaxWaitSamples)
+                return;
+            // Never settled (wide vibrato, a slow scoop): the median of the
+            // newer half since the onset (past the start of a scoop, still
+            // long enough to average vibrato).
+            median = lockMedian (lockSince + (t - lockSince) / 2, spread, slope);
+        }
 
         note = snapper.snap (median);
+        lockCentre = median;
+        lockCentreTime = t;
+        centrePausedSince = -1;
         out[count++] = { true, note, attackPeakDb, t };
         candidate = -1;
         noteOnTime = t;
@@ -444,14 +473,39 @@ int NoteTracker::processLock (const TrackerFrame& f, bool usable, bool levelOn, 
             }
 
             // Big-leap escape; otherwise the pitch never changes the note.
-            if (lockLeapSemis <= 0.0f)
+            // (Not in a fading tail: the pitch of a decaying note is unreliable.)
+            if (lockLeapSemis <= 0.0f || ! levelOn)
+            {
+                leapSince = -1;
                 break;
+            }
 
-            const float d = f.pitch - static_cast<float> (note);
+            // Distance from where the note is actually sung (a slow average
+            // of its pitch), not from the note number: vibrato or wander
+            // around a note chosen near its edge must not look like a leap.
+            const float d = f.pitch - lockCentre;
             const int side = d > lockLeapSemis ? 1 : (d < -lockLeapSemis ? -1 : 0);
             if (side == 0)
             {
                 leapSince = -1;
+                // The average follows wander and vibrato, but pauses (up to
+                // 100 ms) while the pitch is on its way out: a portamento
+                // into a leap must not drag the reference along.
+                if (std::abs (d) > 0.5f * lockLeapSemis)
+                {
+                    if (centrePausedSince < 0)
+                        centrePausedSince = t;
+                    if (static_cast<double> (t - centrePausedSince) < kLockCentreSeconds * sr)
+                        break;
+                }
+                else
+                {
+                    centrePausedSince = -1;
+                }
+                const double dt = static_cast<double> (t - lockCentreTime) / sr;
+                const auto a = static_cast<float> (1.0 - std::exp (-dt / kLockCentreSeconds));
+                lockCentre += a * (f.pitch - lockCentre);
+                lockCentreTime = t;
                 break;
             }
             if (leapSince < 0 || side != leapSide)
@@ -461,9 +515,24 @@ int NoteTracker::processLock (const TrackerFrame& f, bool usable, bool levelOn, 
             }
             if (t - leapSince >= lockLeapSamples && age >= minNoteSamples)
             {
-                float spread = 0.0f;
-                const int c = snapper.snap (lockMedian (std::max (leapSince - 1, t - lockSettleSamples), spread));
+                // Choose the new note like a fresh one: from the settled
+                // pitch, so a portamento does not pick a passing note.
+                const std::int64_t since = std::max (leapSince - 1, t - lockSettleSamples);
+                float spread = 0.0f, slope = 0.0f;
+                const float median = lockMedian (since, spread, slope);
+                const bool settled = spread * 100.0f <= kLockSpreadCents && std::abs (slope) <= kLockMaxSlope;
+                if (! settled && t - leapSince < lockLeapSamples + lockMaxWaitSamples - lockSettleSamples)
+                    break;
+
                 leapSince = -1;
+                // The settled pitch itself must be a leap (not a passing
+                // note of a portamento, nor a return towards the note).
+                if (std::abs (median - lockCentre) <= lockLeapSemis)
+                    break;
+                const int c = snapper.snap (median);
+                lockCentre = median;
+                lockCentreTime = t;
+                centrePausedSince = -1;
                 if (c != note)
                 {
                     out[count++] = { false, note, kSilentDb, t };

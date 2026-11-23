@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "mode": "melody",
+  "blockSize": 256,
+  "toleranceMs": 100,
+  "tolerance": {
+    "f1": 0.02,
+    "onsetErrorMs": 2,
+    "falseTriggersPerMinute": 1
+  },
+  "limits": {
+    "minF1": 0.9,
+    "maxMeanAbsOnsetErrorMs": 60,
+    "maxFalseTriggersPerMinute": 0.5
+  },
+  "scenarios": {
+    "chromatic_scale": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 28.165833333333286,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 30.165833333333286,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "consonant_onsets": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 31.590277777777796,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 33.5902777777778,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "dynamics": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 25.179166666666614,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 27.179166666666614,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "fast_16ths_detached": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 25.645833333333357,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 27.645833333333357,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "fast_16ths_legato": {
+      "f1": 0.9333333333333333,
+      "meanAbsOnsetErrorMs": 38.907738095238095,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.9133333333333333,
+      "maxMeanAbsOnsetErrorMs": 40.907738095238095,
+      "maxFalseTriggersPerMinute": 1,
+      "knownLimitation": "Lock: one legato semitone step is held by design (below the 1.2-semitone big-leap threshold)."
+    },
+    "glide": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 32.64583333333331,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 34.64583333333331,
+      "maxFalseTriggersPerMinute": 0.5,
+      "maxGlideFailures": 0
+    },
+    "high_range": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 21.312500000000032,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 23.312500000000032,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "hum_50hz": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 26.91249999999996,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 28.91249999999996,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "hum_60hz": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 27.445833333333326,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 29.445833333333326,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "low_male_range": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 37.20138888888896,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 39.20138888888896,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "major_scale_legato": {
+      "f1": 0.8571428571428571,
+      "meanAbsOnsetErrorMs": 37.31249999999998,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.8371428571428571,
+      "maxMeanAbsOnsetErrorMs": 39.31249999999998,
+      "maxFalseTriggersPerMinute": 1,
+      "knownLimitation": "Lock: legato semitone steps (E-F, B-C) without a re-articulation are held by design (below the 1.2-semitone big-leap threshold); whole-tone and wider steps pass via the big-leap rule."
+    },
+    "noise_only": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": null,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": null,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "noisy_20db_snr": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 27.579166666666787,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 29.579166666666787,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "pitch_drift": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 27.201388888888832,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 29.201388888888832,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "repeated_same_pitch": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 26.312500000000025,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 28.312500000000025,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "scoop_ups": {
+      "f1": 0.8333333333333334,
+      "meanAbsOnsetErrorMs": 85.1791666666667,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.8133333333333334,
+      "maxMeanAbsOnsetErrorMs": 87.1791666666667,
+      "maxFalseTriggersPerMinute": 1,
+      "knownLimitation": "Lock waits until the 150-cent scoop has settled before choosing the note: 5 of 6 notes correct but ~85 ms after the onset; one is chosen a semitone off at the 60 ms settle timeout."
+    },
+    "silence": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": null,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": null,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "soft_rearticulation": {
+      "f1": 0.9090909090909091,
+      "meanAbsOnsetErrorMs": 42.3791666666667,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.9,
+      "maxMeanAbsOnsetErrorMs": 44.3791666666667,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "sustained_notes": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 27.31249999999985,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 29.31249999999985,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "tremolo_vibrato": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 37.09027777777777,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 39.09027777777777,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "unsteady_melody_detached": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 48.889348744464264,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 50.889348744464264,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "unsteady_melody_legato": {
+      "f1": 0.8571428571428571,
+      "meanAbsOnsetErrorMs": 50.9477205249888,
+      "falseTriggersPerMinute": 8.492243456107191,
+      "minF1": 0.8371428571428571,
+      "maxMeanAbsOnsetErrorMs": 52.9477205249888,
+      "maxFalseTriggersPerMinute": 9.492243456107191,
+      "knownLimitation": "Lock: the two legato semitone steps are held by design, and one breath starts with a scoop that is chosen a semitone low. Re-articulate ('da-da') or use Follow pitch for legato semitones."
+    },
+    "unsteady_sustained": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 36.20138888888912,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 38.20138888888912,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "vibrato": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 58.86805555555558,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 60,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "voice_formants": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 26.756944444444457,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 28.756944444444457,
+      "maxFalseTriggersPerMinute": 0.5
+    },
+    "weak_fundamental": {
+      "f1": 1,
+      "meanAbsOnsetErrorMs": 27.845833333333267,
+      "falseTriggersPerMinute": 0,
+      "minF1": 0.98,
+      "maxMeanAbsOnsetErrorMs": 29.845833333333267,
+      "maxFalseTriggersPerMinute": 0.5
+    }
+  }
+}

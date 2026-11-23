@@ -12,6 +12,7 @@
 
 #include "m2m/beatbox/BeatboxEngine.h"
 #include "m2m/melody/MelodyEngine.h"
+#include "m2m/melody/Stability.h"
 #include "m2m/test/Drums.h"
 #include "m2m/test/Scenarios.h"
 
@@ -102,6 +103,9 @@ namespace
         const auto b = test::makeScenario ("vibrato", sr)->audio;
         const auto c = test::makeScenario ("repeated_same_pitch", sr)->audio;
         const std::vector<float> bHalf (b.begin(), b.begin() + static_cast<std::ptrdiff_t> (b.size() / 2));
+        const auto u = test::makeScenario ("unsteady_melody_detached", sr)->audio;
+        const auto l = test::makeScenario ("unsteady_melody_legato", sr)->audio;
+        const std::vector<float> uHalf (u.begin(), u.begin() + static_cast<std::ptrdiff_t> (u.size() / 2));
 
         MelodyEngine e;
         e.prepare (sr, 512);
@@ -133,6 +137,26 @@ namespace
             feed (e, bHalf, 128, buf);
             e.setParams (odd);
             feed (e, c, 1, buf);
+            buf.clear();
+            e.flush (buf, 0);
+        });
+        MelodyParams lock = mpm;
+        lock.pitchFollow = PitchFollow::Lock;
+        MelodyParams lockTight = applyStability (lock, 1.0f);
+        lockTight.scale = Scale::Major;
+        expectNoAllocation (("melody: Lock + process (settle, retrigger, big leap; block 256)" + sfx).c_str(), [&]
+        {
+            e.setParams (lock);
+            feed (e, u, 256, buf);
+            feed (e, l, 31, buf);
+        });
+        expectNoAllocation (("melody: Free <-> Lock + applyStability mid-note + flush" + sfx).c_str(), [&]
+        {
+            feed (e, uHalf, 128, buf);
+            e.setParams (applyStability (mpm, 0.9f));
+            feed (e, l, 64, buf);
+            e.setParams (lockTight);
+            feed (e, uHalf, 512, buf);
             buf.clear();
             e.flush (buf, 0);
         });

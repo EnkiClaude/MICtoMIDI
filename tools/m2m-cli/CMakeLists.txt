@@ -21,6 +21,11 @@ if(M2M_BUILD_TESTS)
     # Deterministic: no wall-clock metric is gated.
     add_test(NAME m2m_cli_gate_melody
              COMMAND m2m-cli eval --mode melody --baseline ${PROJECT_SOURCE_DIR}/tests/baselines/melody.json)
+    # Note lock: scored with a 100 ms onset window (Lock trades note-on
+    # latency for the right note; see docs/m2m-cli.md).
+    add_test(NAME m2m_cli_gate_melody_lock
+             COMMAND m2m-cli eval --mode melody --set follow=lock --tolerance-ms 100
+                     --baseline ${PROJECT_SOURCE_DIR}/tests/baselines/melody_lock.json)
     add_test(NAME m2m_cli_gate_beatbox
              COMMAND m2m-cli eval --mode beatbox --baseline ${PROJECT_SOURCE_DIR}/tests/baselines/beatbox.json)
 endif()

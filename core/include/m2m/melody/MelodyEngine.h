@@ -63,10 +63,10 @@ struct MelodyParams
 
     // Pitch follow (appended; Free = the behaviour before note lock existed)
     PitchFollow pitchFollow     = PitchFollow::Free;
-    float lockSettleMs          = 40.0f;   // Lock: pitch window after the onset that chooses the note
-    float lockLeapSemitones     = 1.5f;    // Lock: a jump beyond this (0 = never) ...
-    float lockLeapMs            = 80.0f;   // ... held this long still changes the note
-    float lockRetriggerBoost    = 0.35f;   // Lock: added to retriggerSensitivity (soft re-articulations count)
+    float lockSettleMs          = 15.0f;   // Lock: settled-pitch window that chooses the note (5..150)
+    float lockLeapSemitones     = 1.2f;    // Lock: a jump beyond this (0 = never) ...
+    float lockLeapMs            = 20.0f;   // ... held this long (then settled) still changes the note
+    float lockRetriggerBoost    = 0.4f;    // Lock: added to retriggerSensitivity (soft re-articulations count)
 };
 
 /** Melody Mode: monophonic voice -> MIDI notes. Deterministic DSP only.
